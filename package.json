@@ -1,0 +1,22 @@
+{
+  "name": "ani-gamer-mgnt",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev -w @agm/server",
+    "dev:web": "npm run dev -w @agm/web",
+    "dev:ext": "npm run dev -w @agm/extension",
+    "build": "npm run build -w @agm/web && npm run build -w @agm/extension",
+    "start": "npm run start -w @agm/server",
+    "test": "vitest run",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.5"
+  }
+}
