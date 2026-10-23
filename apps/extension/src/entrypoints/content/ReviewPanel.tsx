@@ -15,6 +15,7 @@ interface Draft {
 }
 
 const emptyDraft = (): Draft => ({ id: null, content: '', rating: null, spoiler: false });
+const canSave = (d: Draft) => d.content.trim() !== '' || d.rating !== null;
 
 export function ReviewPanel({ info }: { info: VideoPageInfo }) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
@@ -43,7 +44,8 @@ export function ReviewPanel({ info }: { info: VideoPageInfo }) {
   }, [refresh, info.animeSn]);
 
   function save() {
-    if (!draft.content.trim()) return;
+    // 只有評分、沒有留言也可以儲存
+    if (!canSave(draft)) return;
     const now = new Date().toISOString();
     const review: Review = {
       id: draft.id ?? ulid(),
@@ -145,7 +147,7 @@ export function ReviewPanel({ info }: { info: VideoPageInfo }) {
               </label>
               <span className="spacer" />
               {draft.id && <button onClick={() => setDraft(emptyDraft())}>取消編輯</button>}
-              <button className="primary" onClick={save} disabled={!draft.content.trim()}>
+              <button className="primary" onClick={save} disabled={!canSave(draft)}>
                 {draft.id ? '更新' : '儲存'}
               </button>
             </div>
@@ -171,13 +173,15 @@ export function ReviewPanel({ info }: { info: VideoPageInfo }) {
                     </button>
                     <button onClick={() => remove(r.id)}>刪除</button>
                   </div>
-                  <p
-                    className={blur ? 'content blur' : 'content'}
-                    onClick={() => blur && setRevealed(new Set(revealed).add(r.id))}
-                    title={blur ? '點擊顯示劇透內容' : undefined}
-                  >
-                    {r.content}
-                  </p>
+                  {r.content && (
+                    <p
+                      className={blur ? 'content blur' : 'content'}
+                      onClick={() => blur && setRevealed(new Set(revealed).add(r.id))}
+                      title={blur ? '點擊顯示劇透內容' : undefined}
+                    >
+                      {r.content}
+                    </p>
+                  )}
                 </li>
               );
             })}

@@ -12,6 +12,7 @@ interface Draft {
 }
 
 const emptyDraft = (): Draft => ({ id: null, content: '', rating: null, spoiler: false });
+const canSave = (d: Draft) => d.content.trim() !== '' || d.rating !== null;
 
 export function AnimeDetailPage() {
   const { id = '' } = useParams();
@@ -30,7 +31,8 @@ export function AnimeDetailPage() {
   }
 
   async function saveReview() {
-    if (!draft.content.trim()) return;
+    // 只有評分、沒有留言也可以儲存
+    if (!canSave(draft)) return;
     const now = new Date().toISOString();
     await api.putReview(draft.id ?? ulid(), {
       animeId: id,
@@ -130,7 +132,7 @@ export function AnimeDetailPage() {
             </label>
             <span className="grow" />
             {draft.id && <button onClick={() => setDraft(emptyDraft())}>取消編輯</button>}
-            <button className="primary" disabled={!draft.content.trim()} onClick={() => void saveReview()}>
+            <button className="primary" disabled={!canSave(draft)} onClick={() => void saveReview()}>
               {draft.id ? '更新' : '儲存'}
             </button>
           </div>
@@ -154,7 +156,7 @@ export function AnimeDetailPage() {
                   刪除
                 </button>
               </div>
-              <p className="review-content">{r.content}</p>
+              {r.content && <p className="review-content">{r.content}</p>}
             </li>
           ))}
         </ul>
