@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用與開發說明</title>
+<style>
+  :root { --bg: #fdfdfc; --fg: #1f2328; --muted: #59636e; --line: #d8dee4; --card: #f6f8fa; --accent: #0969da; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #30363d; --card: #161b22; --accent: #4493f8; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.7 system-ui, "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; }
+  h2 { font-size: 1.35rem; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .meta { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: .95rem; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  .table-wrap { overflow-x: auto; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; background: var(--card); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>使用與開發說明</h1>
+<p class="meta">需求：Node.js 22.13 以上（使用內建的 <code>node:sqlite</code>）、Chrome。</p>
+
+<section>
+<h2>1. 第一次安裝</h2>
+<pre><code>npm install
+npm run build          # 建置管理頁與 extension</code></pre>
+<ol>
+  <li>開啟 <code>chrome://extensions</code>，打開右上角「開發人員模式」。</li>
+  <li>按「載入未封裝項目」，選擇 <code>apps/extension/.output/chrome-mv3</code>。</li>
+</ol>
+</section>
+
+<section>
+<h2>2. 日常使用</h2>
+<pre><code>npm start              # 啟動本機 server：http://127.0.0.1:17890</code></pre>
+<ul>
+  <li><strong>隱藏</strong>：滑鼠移到動畫瘋的動畫卡片上，左上角會出現「隱藏」。隱藏後預設摺疊成一行，可按「還原」。</li>
+  <li><strong>觀看紀錄</strong>：在播放頁開始播放就會自動記錄，之後每 15 秒回報一次進度；進度達片長 85% 視為看完。</li>
+  <li><strong>評論</strong>：播放頁的動畫名稱下方有「我的評論」面板。</li>
+  <li><strong>卡片標章</strong>：看過的動畫會顯示「看到第 N 集」，看完最新一集則顯示「✓ 看完」。</li>
+  <li><strong>管理頁</strong>：點 extension 圖示 →「開啟管理頁」，或直接開啟 <code>http://127.0.0.1:17890</code>。</li>
+  <li><strong>popup 設定</strong>：可暫時顯示已隱藏的動畫，或把隱藏方式改成完全移除。</li>
+</ul>
+
+<h3>Server 沒開時</h3>
+<p>extension 圖示會出現紅色「!」，動畫瘋頁面也會跳出提示。期間的觀看紀錄、隱藏與評論會暫存在瀏覽器中，server 啟動後（最慢 30 秒內）會自動補送。</p>
+</section>
+
+<section>
+<h2>3. 資料</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>路徑</th><th>內容</th></tr></thead>
+  <tbody>
+    <tr><td><code>data/app.db</code></td><td>SQLite 資料庫（動畫、集數、觀看紀錄、評論）</td></tr>
+    <tr><td><code>data/covers/</code></td><td>封面圖片，檔名為本機動畫 ID</td></tr>
+  </tbody>
+</table>
+</div>
+<ul>
+  <li><code>data/</code> 已加入 <code>.gitignore</code>，不會進 git。</li>
+  <li>備份：先停止 server，再複製整個 <code>data/</code> 資料夾。</li>
+  <li>可用環境變數 <code>AGM_DATA_DIR</code> 改變資料目錄，<code>AGM_PORT</code> 改變連接埠（改了要同步到 popup 的「進階設定」）。</li>
+</ul>
+</section>
+
+<section>
+<h2>4. 開發</h2>
+<pre><code>npm run dev:server     # server（檔案變更自動重啟）
+npm run dev:web        # 管理頁：http://localhost:5173，API 會 proxy 到 server
+npm run dev:ext        # extension：載入 apps/extension/.output/chrome-mv3-dev
+npm test               # 全部測試
+npm run typecheck</code></pre>
+
+<h3>專案結構</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>目錄</th><th>說明</th></tr></thead>
+  <tbody>
+    <tr><td><code>packages/shared</code></td><td>API 型別與 zod schema，server 與前端共用</td></tr>
+    <tr><td><code>apps/server</code></td><td>Hono + <code>node:sqlite</code>；schema 遷移在 <code>src/db.ts</code>（只能往後加）</td></tr>
+    <tr><td><code>apps/web</code></td><td>管理頁（Vite + React）</td></tr>
+    <tr><td><code>apps/extension</code></td><td>WXT + React。<code>src/bahamut/parse.ts</code> 是所有動畫瘋選擇器，網站改版時先看這裡</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>網站改版時</h3>
+<ol>
+  <li>播放頁解析失敗時，content script 會在 console 印出「無法解析播放頁」。</li>
+  <li>對照 <a href="bahamut-dom.html">頁面結構調查</a>，修改 <code>src/bahamut/parse.ts</code>。</li>
+  <li>更新 <code>apps/extension/test/fixtures/</code> 的頁面片段並跑測試。</li>
+</ol>
+</section>
+</main>
+</body>
+</html>

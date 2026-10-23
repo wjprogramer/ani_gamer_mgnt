@@ -43,7 +43,7 @@
 <main>
 
 <h1>動畫瘋個人管理工具：可行性評估</h1>
-<p class="meta">狀態：規劃中（尚未動工）・建立日期：2026-10-23・最後更新：2026-10-23（納入第一輪決策）</p>
+<p class="meta">狀態：M0–M4 已實作，M5 待辦・建立日期：2026-10-23・最後更新：2026-10-23（實作時的調整見第 5 節「實作時的調整」）</p>
 
 <div class="callout">
   <strong>結論：</strong>四項需求都可行。架構採 <strong>Chrome Extension + 本機 Server</strong>：資料一開始就以實體檔案（SQLite + 封面圖檔）存在硬碟上；server 沒開時，extension 要主動提醒。
@@ -149,10 +149,23 @@
   <tbody>
     <tr><td>Extension</td><td>WXT + React + TypeScript（MV3）</td><td>內建處理 manifest、HMR 與打包</td></tr>
     <tr><td>Server</td><td>Hono（或 Express）+ TypeScript</td><td>輕量；本機單人使用，不需要 Next.js 的 SSR</td></tr>
-    <tr><td>資料庫</td><td>SQLite（better-sqlite3）+ Drizzle ORM</td><td>單一檔案、方便備份；Drizzle 可管理 schema 遷移</td></tr>
+    <tr><td>資料庫</td><td>SQLite（Node 內建 <code>node:sqlite</code>）+ 自寫 SQL 遷移</td><td>單一檔案、方便備份；不需要編譯原生模組</td></tr>
     <tr><td>管理頁</td><td>Vite + React + TypeScript，由 server 提供</td><td>打開瀏覽器連到 localhost 即可使用</td></tr>
     <tr><td>共用</td><td><code>packages/shared</code>（型別、zod schema）</td><td>Extension 與 server 共用 API 契約</td></tr>
-    <tr><td>Monorepo</td><td>pnpm workspaces</td><td><code>apps/extension</code>、<code>apps/server</code>、<code>apps/web</code>、<code>packages/shared</code></td></tr>
+    <tr><td>Monorepo</td><td>npm workspaces</td><td><code>apps/extension</code>、<code>apps/server</code>、<code>apps/web</code>、<code>packages/shared</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>實作時的調整</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>原規劃</th><th>實際做法</th><th>原因</th></tr></thead>
+  <tbody>
+    <tr><td>pnpm workspaces</td><td>npm workspaces</td><td>環境沒有安裝 pnpm，npm 內建即可</td></tr>
+    <tr><td>better-sqlite3 + Drizzle</td><td><code>node:sqlite</code> + 自寫 SQL 遷移</td><td>better-sqlite3 需要針對 Node 版本編譯原生模組；資料表不多，手寫 SQL 已足夠</td></tr>
+    <tr><td>API 需帶本機 token</td><td>檢查 Host 與 Origin</td><td>瀏覽器無法偽造 Origin，效果相同，且不必手動把 token 貼進 extension</td></tr>
+    <tr><td>卡片需要「單集 sn → 動畫 sn」對應</td><td>多數卡片直接帶動畫 sn，只有週期表需要對應</td><td>見 <a href="bahamut-dom.html">頁面結構調查</a></td></tr>
   </tbody>
 </table>
 </div>
@@ -168,7 +181,7 @@
 <h3>注意事項</h3>
 <ul>
   <li>Content script 不直接呼叫 localhost（會受頁面 CORS 與 Private Network Access 限制），<strong>一律透過 background 轉送</strong>。</li>
-  <li><strong>本機 server 的安全性</strong>：只綁定 <code>127.0.0.1</code>；CORS 只允許 extension 的 origin 和管理頁；API 需帶本機 token，防止其他網站在背景呼叫你的 localhost。</li>
+  <li><strong>本機 server 的安全性</strong>：只綁定 <code>127.0.0.1</code>；檢查 Host（防 DNS rebinding）並只允許 extension 與管理頁的 Origin，防止其他網站在背景呼叫你的 localhost。</li>
   <li>MV3 的 service worker 隨時會被關閉，狀態不能只放在記憶體裡。</li>
   <li><code>data/</code> 不進 git（加到 <code>.gitignore</code>），路徑可以設定；備份時直接複製整個資料夾。</li>
 </ul>
@@ -213,19 +226,19 @@ sn_cache         source, episode_sn, anime_sn, fetched_at</code></pre>
   <li><strong>網站改版</strong>：選擇器集中放在一個檔案裡；抓不到元素時用 badge 提示，不要默默失效。可以存幾份實際頁面的 HTML 當成測試資料。</li>
   <li><strong>請求頻率</strong>：背景抓單集頁和封面時要節流並快取。</li>
   <li><strong>著作權</strong>：封面只供個人本機使用、不對外散佈。</li>
-  <li><strong>Schema 遷移</strong>：從第一版就用 Drizzle 管理遷移。</li>
+  <li><strong>Schema 遷移</strong>：從第一版就以 <code>PRAGMA user_version</code> 管理遷移（<code>apps/server/src/db.ts</code>）。</li>
 </ul>
 </section>
 
 <section>
 <h2>9. 里程碑</h2>
 <ol>
-  <li><strong>M0 調查</strong>：實際擷取首頁、所有動畫、動畫頁、播放頁、觀看紀錄頁的 DOM，確認選擇器與 sn 的取得方式。</li>
-  <li><strong>M1 基礎</strong>：建立 monorepo；server（SQLite、Drizzle、健康檢查、token）；extension 骨架（background 代理、server 狀態提醒、暫存佇列）。</li>
-  <li><strong>M2 建檔與觀看紀錄</strong>：自動建立動畫資料、下載封面、偵測播放並記錄。</li>
-  <li><strong>M3 隱藏與觀看狀態</strong>：卡片按鈕、sn 對應快取、標章、隱藏清單管理。</li>
-  <li><strong>M4 評論與管理頁</strong>：評論面板；管理頁可瀏覽動畫、觀看紀錄、評論與隱藏清單。</li>
-  <li><strong>M5 可選匯入</strong>：匯入動畫瘋既有的觀看紀錄。</li>
+  <li>✅ <strong>M0 調查</strong>：實際擷取首頁、所有動畫、動畫頁、播放頁、觀看紀錄頁的 DOM，確認選擇器與 sn 的取得方式。</li>
+  <li>✅ <strong>M1 基礎</strong>：建立 monorepo；server（SQLite、健康檢查、Host／Origin 檢查）；extension 骨架（background 代理、server 狀態提醒、暫存佇列）。</li>
+  <li>✅ <strong>M2 建檔與觀看紀錄</strong>：自動建立動畫資料、下載封面、偵測播放並記錄。</li>
+  <li>✅ <strong>M3 隱藏與觀看狀態</strong>：卡片按鈕、sn 對應快取、標章、隱藏清單管理。</li>
+  <li>✅ <strong>M4 評論與管理頁</strong>：評論面板；管理頁可瀏覽動畫、觀看紀錄、評論與隱藏清單。</li>
+  <li><strong>M5 可選匯入</strong>：匯入動畫瘋既有的觀看紀錄。觀看紀錄頁需要登入才看得到，尚未調查結構。</li>
 </ol>
 </section>
 
