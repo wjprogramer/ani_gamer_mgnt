@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>動畫瘋頁面結構調查</title>
+<style>
+  :root { --bg: #fdfdfc; --fg: #1f2328; --muted: #59636e; --line: #d8dee4; --card: #f6f8fa; --accent: #0969da; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #30363d; --card: #161b22; --accent: #4493f8; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.7 system-ui, "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; }
+  h2 { font-size: 1.35rem; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .meta { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: .95rem; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  .table-wrap { overflow-x: auto; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; background: var(--card); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  .callout { border-left: 4px solid var(--accent); background: var(--card); padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 16px 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>動畫瘋頁面結構調查（M0）</h1>
+<p class="meta">調查日期：2026-10-23・方式：以未登入狀態抓取伺服器端 HTML。網站改版後需重新驗證，對應程式碼在 <code>apps/extension/src/bahamut/</code>。</p>
+
+<div class="callout">
+  <strong>重點：</strong>可行性評估中擔心的「卡片只帶單集 sn」問題，大部分情況<strong>不存在</strong>。卡片上的收藏按鈕 <code>animefun.toggleGather(acgSn, animeSn, …)</code> 直接帶有動畫 sn；只有「週期表」的純文字連結需要從同一頁的其他卡片取得對應。
+</div>
+
+<h2>1. 三種 ID</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>ID</th><th>意義</th><th>出現位置</th></tr></thead>
+  <tbody>
+    <tr><td>animeSn</td><td>動畫（作品）。本專案以此為 <code>anime_source.external_id</code></td><td><code>animeRef.php?sn=</code>、<code>data-animesn</code>、<code>toggleGather</code> 第 2 個參數</td></tr>
+    <tr><td>videoSn</td><td>單集</td><td><code>animeVideo.php?sn=</code>、<code>data-ani-video-sn</code></td></tr>
+    <tr><td>acgSn</td><td>巴哈 ACG 資料庫作品 ID</td><td><code>acgDetail.php?s=</code>、<code>toggleGather</code> 第 1 個參數</td></tr>
+  </tbody>
+</table>
+</div>
+<p><code>animeRef.php?sn=X</code> 會 301 轉址到該動畫第一集的 <code>animeVideo.php</code>，所以「動畫頁」實際上就是播放頁。同一個 animeSn 可能包含多季（例如第 1–13 集是第一季，第 14 集之後是第二季）。</p>
+
+<h2>2. 卡片</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>頁面</th><th>選擇器</th><th>連結</th><th>取得 animeSn</th><th>名稱</th></tr></thead>
+  <tbody>
+    <tr><td>首頁「本季新番」</td><td><code>a.anime-card-block</code></td><td>videoSn</td><td>最近的 <code>.newanime-date-area[data-animesn]</code>，或卡片內的 <code>toggleGather</code></td><td><code>.anime-name</code></td></tr>
+    <tr><td>首頁「週期表」</td><td><code>a.text-anime-info</code></td><td>videoSn</td><td>從同一頁其他卡片建立 videoSn → animeSn 的對應</td><td><code>.text-anime-name</code></td></tr>
+    <tr><td>首頁熱播／主題推薦、所有動畫</td><td><code>a.theme-list-main</code></td><td>animeSn</td><td>連結本身</td><td><code>.theme-name</code></td></tr>
+  </tbody>
+</table>
+</div>
+<p>圖片採 lazyload：真正的網址放在 <code>img[data-src]</code>。</p>
+
+<h2>3. 播放頁 <code>animeVideo.php?sn=</code></h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>資料</th><th>來源</th></tr></thead>
+  <tbody>
+    <tr><td>videoSn</td><td>網址的 <code>sn</code>；inline script 中的 <code>animefun.videoSn = 51805;</code></td></tr>
+    <tr><td>animeSn、acgSn</td><td><code>.anime_name button[onclick*=toggleGather]</code></td></tr>
+    <tr><td>動畫名稱</td><td><code>.data-file img.data-img</code> 的 <code>alt</code>（<code>h1</code> 會帶「[16]」集數，不適合）</td></tr>
+    <tr><td>封面</td><td><code>.data-file img.data-img</code> 的 <code>data-src</code>，格式為 <code>p2.bahamut.com.tw/B/ACG/c/&lt;acgSn 末兩碼&gt;/&lt;acgSn 補零至 10 碼&gt;.JPG</code></td></tr>
+    <tr><td>分類標籤</td><td><code>.data-file .tag-list .tag</code></td></tr>
+    <tr><td>集數列表</td><td><code>section.season li a[data-ani-video-sn]</code>；目前這一集是 <code>li.playing</code></td></tr>
+    <tr><td>播放器</td><td><code>&lt;video&gt;</code> 由 JS 動態建立，伺服器端 HTML 裡沒有，要用 <code>MutationObserver</code> 等它出現</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>4. 其他</h2>
+<ul>
+  <li>封面圖片不檢查 Referer，server 可以直接下載。</li>
+  <li>觀看紀錄頁需要登入，本次無法調查，留到 M5（可選匯入）再處理。</li>
+</ul>
+</main>
+</body>
+</html>
