@@ -54,6 +54,33 @@ export const bahamutWatchSchema = z.object({
 });
 export type BahamutWatch = z.infer<typeof bahamutWatchSchema>;
 
+/** 從動畫瘋觀看紀錄頁匯入 */
+export const bahamutImportSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        animeSn: sn,
+        title: z.string().min(1),
+        coverUrl: z.url().optional(),
+        videoSn: sn,
+        episodeLabel: z.string().optional(),
+        watchedAt: isoTime,
+        progressSec: z.number().nonnegative().optional(),
+        durationSec: z.number().nonnegative().optional(),
+        completed: z.boolean().optional(),
+      }),
+    )
+    .max(2000),
+});
+export type BahamutImport = z.infer<typeof bahamutImportSchema>;
+export type BahamutImportItem = BahamutImport['items'][number];
+
+export interface ImportResult {
+  imported: number;
+  /** 已有相近時間的紀錄（自動記錄或之前匯入過） */
+  skipped: number;
+}
+
 export const reviewPutSchema = z
   .object({
     animeId: z.string().optional(),

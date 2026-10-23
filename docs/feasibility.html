@@ -43,7 +43,7 @@
 <main>
 
 <h1>動畫瘋個人管理工具：可行性評估</h1>
-<p class="meta">狀態：M0–M4 已實作，M5 待辦・建立日期：2026-10-23・最後更新：2026-10-23（實作時的調整見第 5 節「實作時的調整」）</p>
+<p class="meta">狀態：M0–M5 已實作・建立日期：2026-10-23・最後更新：2026-10-23（實作時的調整見第 5 節「實作時的調整」）</p>
 
 <div class="callout">
   <strong>結論：</strong>四項需求都可行。架構採 <strong>Chrome Extension + 本機 Server</strong>：資料一開始就以實體檔案（SQLite + 封面圖檔）存在硬碟上；server 沒開時，extension 要主動提醒。
@@ -238,7 +238,7 @@ sn_cache         source, episode_sn, anime_sn, fetched_at</code></pre>
   <li>✅ <strong>M2 建檔與觀看紀錄</strong>：自動建立動畫資料、下載封面、偵測播放並記錄。</li>
   <li>✅ <strong>M3 隱藏與觀看狀態</strong>：卡片按鈕、sn 對應快取、標章、隱藏清單管理。</li>
   <li>✅ <strong>M4 評論與管理頁</strong>：評論面板；管理頁可瀏覽動畫、觀看紀錄、評論與隱藏清單。</li>
-  <li><strong>M5 可選匯入</strong>：匯入動畫瘋既有的觀看紀錄。觀看紀錄頁需要登入才看得到，尚未調查結構。</li>
+  <li>✅ <strong>M5 可選匯入</strong>：在觀看紀錄頁加上匯入按鈕，由使用者自行決定是否匯入。</li>
 </ol>
 </section>
 

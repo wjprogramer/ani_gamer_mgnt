@@ -9,9 +9,11 @@ import {
   type AnimeSummary,
   type BahamutAnimeUpsert,
   type BahamutHide,
+  type BahamutImportItem,
   type BahamutWatch,
   type CardStatus,
   type Episode,
+  type ImportResult,
   type Review,
   type ReviewPut,
   type SnMap,
@@ -58,6 +60,13 @@ interface ReviewRow {
 export class NotFoundError extends Error {}
 
 const now = () => new Date().toISOString();
+/** 匯入時，同一集在這個時間範圍內已有紀錄就視為重複 */
+const IMPORT_DEDUPE_MINUTES = 30;
+
+/** 由集數標籤推算排序；播放頁建檔時會以實際順序覆蓋 */
+function labelOrder(label?: string): number | undefined {
+  return label && /^\d+$/.test(label) ? Number(label) - 1 : undefined;
+}
 const bahamutAnimeUrl = (animeSn: string) => `https://ani.gamer.com.tw/animeRef.php?sn=${animeSn}`;
 
 export class Store {
@@ -362,6 +371,53 @@ export class Store {
         .run(input.id, episodeId, animeId, input.startedAt, input.at, input.progressSec, input.durationSec, completed);
       const row = this.db.prepare('SELECT * FROM watch_event WHERE id = ?').get(input.id) as unknown as WatchRow;
       return { watch: toWatch(row), coverUrl: this.pendingCoverUrl(animeId) };
+    });
+  }
+
+  /**
+   * 匯入動畫瘋觀看紀錄。同一集在前後 IMPORT_DEDUPE_MINUTES 內已有紀錄就略過，
+   * 所以重複匯入、或與自動記錄重疊都不會產生重複資料。
+   */
+  importWatches(items: BahamutImportItem[]): ImportResult & { covers: [string, string][] } {
+    return transaction(this.db, () => {
+      const result = { imported: 0, skipped: 0, covers: [] as [string, string][] };
+      const near = this.db.prepare(
+        `SELECT 1 FROM watch_event WHERE episode_id = ?
+         AND ABS(julianday(started_at) - julianday(?)) * 1440 < ? LIMIT 1`,
+      );
+      const insert = this.db.prepare(
+        `INSERT INTO watch_event (id, episode_id, anime_id, started_at, last_seen_at, progress_sec, duration_sec, completed, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'import')`,
+      );
+      const seenAnime = new Set<string>();
+      for (const item of items) {
+        const isNew = !this.findAnimeId(BAHAMUT, item.animeSn);
+        const animeId = this.ensureBahamutAnime({
+          animeSn: item.animeSn,
+          title: isNew ? item.title : undefined,
+          coverUrl: item.coverUrl,
+        });
+        if (!seenAnime.has(animeId)) {
+          seenAnime.add(animeId);
+          const cover = this.pendingCoverUrl(animeId);
+          if (cover) result.covers.push([animeId, cover]);
+        }
+        const known = this.db.prepare('SELECT id FROM episode WHERE source = ? AND external_id = ?').get(BAHAMUT, item.videoSn) as
+          | { id: string }
+          | undefined;
+        // 已建檔的集數保留播放頁取得的名稱與順序
+        const episodeId = known?.id ?? this.upsertEpisode(animeId, item.videoSn, item.episodeLabel, labelOrder(item.episodeLabel));
+        if (near.get(episodeId, item.watchedAt, IMPORT_DEDUPE_MINUTES)) {
+          result.skipped++;
+          continue;
+        }
+        const duration = item.durationSec ?? 0;
+        const progress = item.progressSec ?? 0;
+        const completed = item.completed || (duration > 0 && progress / duration >= COMPLETED_RATIO);
+        insert.run(ulid(), episodeId, animeId, item.watchedAt, item.watchedAt, progress, duration, completed ? 1 : 0);
+        result.imported++;
+      }
+      return result;
     });
   }
 

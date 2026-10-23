@@ -34,6 +34,17 @@ a.text-anime-info .agm-badge { position: static; display: inline-block; margin-l
   all: unset; cursor: pointer; color: #0969da; flex: none;
 }
 .agm-placeholder button:hover { text-decoration: underline; }
+.agm-import {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 8px 0 16px; padding: 10px 14px; border: 1px solid #0969da; border-radius: 8px;
+  font: 14px/1.6 system-ui, "Microsoft JhengHei", sans-serif;
+}
+.agm-import span { flex: 1; min-width: 200px; }
+.agm-import button {
+  cursor: pointer; border: none; border-radius: 6px; padding: 4px 12px;
+  background: #0969da; color: #fff; font: inherit;
+}
+.agm-import button:disabled { opacity: .5; cursor: default; }
 .agm-toast {
   position: fixed; top: 16px; right: 16px; z-index: 2147483647; max-width: 360px;
   padding: 10px 14px; border-radius: 8px; background: #cf222e; color: #fff;

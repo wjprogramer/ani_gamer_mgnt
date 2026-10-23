@@ -1,8 +1,10 @@
 import { createShadowRootUi, defineContentScript, type ContentScriptContext } from '#imports';
 import { createRoot } from 'react-dom/client';
+import { isHistoryPage } from '../../bahamut/history.ts';
 import { isVideoPage, parseVideoPage } from '../../bahamut/parse.ts';
 import { mutate, send } from '../../lib/messages.ts';
 import { startCards } from './cards.ts';
+import { initHistoryImport } from './history-import.ts';
 import { injectPageStyle } from './page-style.ts';
 import { ReviewPanel } from './ReviewPanel.tsx';
 import { trackWatch } from './watch.ts';
@@ -31,6 +33,7 @@ export default defineContentScript({
       page?.abort();
       page = new AbortController();
       if (isVideoPage(location.href)) void initVideoPage(ctx, page.signal);
+      else if (isHistoryPage(location.href)) initHistoryImport(page.signal);
     };
     check();
     ctx.setInterval(check, URL_POLL_MS);

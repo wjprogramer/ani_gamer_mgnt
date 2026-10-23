@@ -79,8 +79,25 @@
 <h2>4. 其他</h2>
 <ul>
   <li>封面圖片不檢查 Referer，server 可以直接下載。</li>
-  <li>觀看紀錄頁需要登入，本次無法調查，留到 M5（可選匯入）再處理。</li>
-</ul>
+  </ul>
+
+<h2>5. 觀看紀錄頁 <code>viewList.php</code>（需登入）</h2>
+<p>調查方式：使用者在登入狀態下另存頁面 HTML。頁面說明觀看紀錄保存期限為 1 年。</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>資料</th><th>來源</th></tr></thead>
+  <tbody>
+    <tr><td>每部動畫一張卡片</td><td><code>.user-watch-list .anime-card</code></td></tr>
+    <tr><td>animeSn</td><td>卡片內 <code>.delete-btn[data-anime-sn]</code></td></tr>
+    <tr><td>名稱、封面</td><td><code>.history-anime-title</code>；<code>img.theme-img</code>（lazyload，優先取 <code>data-src</code>）</td></tr>
+    <tr><td>最近看的那一集</td><td><code>a.click-area</code> 的 videoSn</td></tr>
+    <tr><td>最近一集的進度</td><td>第二個 <code>.history-lastwatch</code>：「觀看至 17 分 58 秒」或「觀看結束」；<code>.progress</code> 的寬度百分比可推算片長</td></tr>
+    <tr><td>各集觀看時間</td><td><code>.user-watchTime-list[data-anime-sn] li a</code>：<code>.date</code> 與 <code>.history-list-anime-title</code>（結尾的「[31]」是集數）。預設隱藏但已在 DOM 中</td></tr>
+    <tr><td>時間格式</td><td>「N 分內」「昨天 HH:MM」「前天 HH:MM」「YYYY.MM.DD HH:MM」（以瀏覽器時區解讀）</td></tr>
+    <tr><td>更早的月份</td><td>按頁面底部 <code>.btn-show-more</code> 才會載入</td></tr>
+  </tbody>
+</table>
+</div>
 </main>
 </body>
 </html>

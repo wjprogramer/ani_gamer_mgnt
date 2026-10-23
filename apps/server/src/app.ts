@@ -6,6 +6,7 @@ import {
   animePatchSchema,
   bahamutAnimeUpsertSchema,
   bahamutHideSchema,
+  bahamutImportSchema,
   bahamutStatusRequestSchema,
   bahamutWatchSchema,
   reviewPutSchema,
@@ -13,6 +14,7 @@ import {
   snMapPutSchema,
   type AnimeFilter,
   type Health,
+  type ImportResult,
 } from '@agm/shared';
 import type { CoverQueue } from './covers.ts';
 import { NotFoundError, type Store } from './store.ts';
@@ -107,6 +109,12 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
     const { watch, coverUrl } = store.recordWatch(await body(c, bahamutWatchSchema));
     queueCover(watch.animeId, coverUrl);
     return c.json(watch);
+  });
+
+  api.post('/bahamut/import', async (c) => {
+    const { covers, ...result } = store.importWatches((await body(c, bahamutImportSchema)).items);
+    for (const [id, url] of covers) queueCover(id, url);
+    return c.json<ImportResult>(result);
   });
 
   // ---- 管理 ----

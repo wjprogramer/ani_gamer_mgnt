@@ -132,6 +132,29 @@ describe('動畫瘋', () => {
     expect(list[0]!.title).toBe('殺手旅店');
   });
 
+  it('匯入觀看紀錄：重複匯入與自動紀錄重疊時略過', async () => {
+    await call('POST', '/api/bahamut/anime', anime);
+    await call('POST', '/api/bahamut/watch', watch());
+    const items = [
+      // 與自動紀錄相差 10 分鐘，視為同一次
+      { animeSn: '113845', title: '殺手旅店', videoSn: '51805', episodeLabel: '16', watchedAt: '2026-10-23T12:10:00.000Z' },
+      { animeSn: '113845', title: '殺手旅店', videoSn: '51804', episodeLabel: '15', watchedAt: '2026-10-20T12:00:00.000Z', completed: true },
+      { animeSn: '9', title: '新動畫', coverUrl: 'https://p2.bahamut.com.tw/x.JPG', videoSn: '90', episodeLabel: '3', watchedAt: '2026-10-01T00:00:00.000Z' },
+    ];
+    expect(await json(call('POST', '/api/bahamut/import', { items }))).toEqual({ imported: 2, skipped: 1 });
+    expect(await json(call('POST', '/api/bahamut/import', { items }))).toEqual({ imported: 0, skipped: 3 });
+    expect(covers.at(-1)?.[1]).toBe('https://p2.bahamut.com.tw/x.JPG');
+
+    const detail = await json<AnimeDetail>(call('GET', '/api/bahamut/anime/113845'));
+    // 已建檔的集數不被匯入資料覆寫
+    expect(detail.episodes.map((e) => [e.label, e.sortOrder])).toEqual([['15', 14], ['16', 15]]);
+    expect(detail.episodes[0]!.watches[0]).toMatchObject({ source: 'import', completed: true });
+
+    const created = await json<AnimeDetail>(call('GET', '/api/bahamut/anime/9'));
+    expect(created).toMatchObject({ title: '新動畫', lastEpisodeLabel: '3' });
+    expect(created.episodes[0]!.sortOrder).toBe(2);
+  });
+
   it('格式錯誤回傳 400', async () => {
     expect((await call('POST', '/api/bahamut/watch', { id: 'x' })).status).toBe(400);
   });
