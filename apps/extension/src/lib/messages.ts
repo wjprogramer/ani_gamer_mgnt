@@ -1,5 +1,6 @@
 import { browser } from '#imports';
 import type { SnMap } from '@agm/shared';
+import type { HistorySyncState } from './storage.ts';
 
 export type Message =
   | { type: 'health' }
@@ -8,7 +9,9 @@ export type Message =
   | { type: 'mutate'; key?: string; method: string; path: string; body?: unknown }
   /** 讀取：server 離線時回傳 offline */
   | { type: 'query'; method: string; path: string; body?: unknown }
-  | { type: 'resolveSn'; videoSns: string[] };
+  | { type: 'resolveSn'; videoSns: string[] }
+  /** 同步動畫瘋觀看紀錄；full 時讀完所有頁 */
+  | { type: 'syncHistory'; full?: boolean };
 
 export interface HealthResult {
   online: boolean;
@@ -24,6 +27,7 @@ interface Responses {
   mutate: { queued: true };
   query: QueryResult<unknown>;
   resolveSn: SnMap;
+  syncHistory: HistorySyncState;
 }
 
 export async function send<M extends Message>(msg: M): Promise<Responses[M['type']]> {

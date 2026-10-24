@@ -141,8 +141,8 @@ describe('動畫瘋', () => {
       { animeSn: '113845', title: '殺手旅店', videoSn: '51804', episodeLabel: '15', watchedAt: '2026-10-20T12:00:00.000Z', completed: true },
       { animeSn: '9', title: '新動畫', coverUrl: 'https://p2.bahamut.com.tw/x.JPG', videoSn: '90', episodeLabel: '3', watchedAt: '2026-10-01T00:00:00.000Z' },
     ];
-    expect(await json(call('POST', '/api/bahamut/import', { items }))).toEqual({ imported: 2, skipped: 1 });
-    expect(await json(call('POST', '/api/bahamut/import', { items }))).toEqual({ imported: 0, skipped: 3 });
+    expect(await json(call('POST', '/api/bahamut/import', { items }))).toEqual({ imported: 2, updated: 0, skipped: 1 });
+    expect(await json(call('POST', '/api/bahamut/import', { items }))).toEqual({ imported: 0, updated: 0, skipped: 3 });
     expect(covers.at(-1)?.[1]).toBe('https://p2.bahamut.com.tw/x.JPG');
 
     const detail = await json<AnimeDetail>(call('GET', '/api/bahamut/anime/113845'));
@@ -153,6 +153,56 @@ describe('動畫瘋', () => {
     const created = await json<AnimeDetail>(call('GET', '/api/bahamut/anime/9'));
     expect(created).toMatchObject({ title: '新動畫', lastEpisodeLabel: '3' });
     expect(created.episodes[0]!.sortOrder).toBe(2);
+  });
+
+  it('匯入觀看紀錄：重看同一集被動畫瘋覆蓋時保留兩筆', async () => {
+    const item = (videoSn: string, label: string, watchedAt: string) => ({
+      animeSn: '113845',
+      title: '殺手旅店',
+      videoSn,
+      episodeLabel: label,
+      watchedAt,
+    });
+    // 依序看 1、2、3 集，動畫瘋的紀錄是 3、2、1
+    await call('POST', '/api/bahamut/import', {
+      items: [
+        item('3', '3', '2026-10-23T12:50:00.000Z'),
+        item('2', '2', '2026-10-23T12:25:00.000Z'),
+        item('1', '1', '2026-10-23T12:00:00.000Z'),
+      ],
+    });
+    // 再看第 1 集，動畫瘋只剩 1、3、2
+    const res = await json(
+      call('POST', '/api/bahamut/import', {
+        items: [
+          item('1', '1', '2026-10-23T13:15:00.000Z'),
+          item('3', '3', '2026-10-23T12:50:00.000Z'),
+          item('2', '2', '2026-10-23T12:25:00.000Z'),
+        ],
+      }),
+    );
+    expect(res).toEqual({ imported: 1, updated: 0, skipped: 2 });
+
+    const history = await json<WatchEvent[]>(call('GET', '/api/watch'));
+    expect(history.map((w) => w.startedAt)).toEqual([
+      '2026-10-23T13:15:00.000Z',
+      '2026-10-23T12:50:00.000Z',
+      '2026-10-23T12:25:00.000Z',
+      '2026-10-23T12:00:00.000Z',
+    ]);
+  });
+
+  it('匯入觀看紀錄：同一筆再次匯入時更新進度；舊版只到分鐘的時間也視為同一筆', async () => {
+    const base = { animeSn: '113845', title: '殺手旅店', videoSn: '51805', episodeLabel: '16' };
+    await call('POST', '/api/bahamut/import', { items: [{ ...base, watchedAt: '2026-10-23T12:00:00.000Z', progressSec: 300 }] });
+    const res = await json(
+      call('POST', '/api/bahamut/import', {
+        items: [{ ...base, watchedAt: '2026-10-23T12:00:48.000Z', progressSec: 1300, durationSec: 1380 }],
+      }),
+    );
+    expect(res).toEqual({ imported: 0, updated: 1, skipped: 0 });
+    const [w] = await json<WatchEvent[]>(call('GET', '/api/watch'));
+    expect(w).toMatchObject({ progressSec: 1300, durationSec: 1380, completed: true });
   });
 
   it('格式錯誤回傳 400', async () => {

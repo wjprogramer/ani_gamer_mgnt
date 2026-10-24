@@ -54,7 +54,7 @@ export const bahamutWatchSchema = z.object({
 });
 export type BahamutWatch = z.infer<typeof bahamutWatchSchema>;
 
-/** 從動畫瘋觀看紀錄頁匯入 */
+/** 從動畫瘋觀看紀錄匯入 */
 export const bahamutImportSchema = z.object({
   items: z
     .array(
@@ -65,6 +65,8 @@ export const bahamutImportSchema = z.object({
         videoSn: sn,
         episodeLabel: z.string().optional(),
         watchedAt: isoTime,
+        /** 最後一次回報進度的時間 */
+        lastSeenAt: isoTime.optional(),
         progressSec: z.number().nonnegative().optional(),
         durationSec: z.number().nonnegative().optional(),
         completed: z.boolean().optional(),
@@ -77,7 +79,9 @@ export type BahamutImportItem = BahamutImport['items'][number];
 
 export interface ImportResult {
   imported: number;
-  /** 已有相近時間的紀錄（自動記錄或之前匯入過） */
+  /** 之前匯入過、這次進度有增加 */
+  updated: number;
+  /** 已存在（自動記錄或之前匯入過且沒有變化） */
   skipped: number;
 }
 

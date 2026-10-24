@@ -1,60 +1,116 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { parseHistoryDate, parseHistoryPage } from '../src/bahamut/history.ts';
+import { describe, expect, it, vi } from 'vitest';
+import { fetchHistory, parseApiTime, parseHistoryResponse, type ApiResponse } from '../src/bahamut/history.ts';
+import { AUTO_SYNC_INTERVAL_MS, isSyncDue } from '../src/lib/sync-due.ts';
 
-// 觀看紀錄頁的結構片段（兩部動畫各 3 集；帳號已移除，觀看時間為虛構值）
-const html = fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'history-page.html'), 'utf8');
-const now = new Date(2026, 9, 23, 22, 30);
+// 觀看紀錄 API 的結構（內容為虛構值）
+const anime = (over: Record<string, unknown> = {}) => ({
+  animeSn: 113845,
+  videoSn: 51805,
+  title: '殺手旅店',
+  cover: 'https://p2.bahamut.com.tw/B/ACG/c/94/0000142294.JPG',
+  episode: '16',
+  duration: 23,
+  watchTime: '2026-10-23 21:00:00',
+  nextVideoSn: 0,
+  isTakenDown: 0,
+  breakPoint: { breakPoint: 1303, watchTime: '2026-10-23 21:22:00' },
+  history: [
+    { videoSn: 51805, title: '殺手旅店 [16]', watchTime: '2026-10-23 21:00:00' },
+    { videoSn: 51804, title: '殺手旅店 [15]', watchTime: '2026-10-23 20:30:00' },
+  ],
+  ...over,
+});
+const page = (history: unknown[], totalPage = 1): ApiResponse => ({ data: { history, totalPage } }) as ApiResponse;
 
-describe('parseHistoryDate', () => {
-  it.each([
-    ['1 分內', new Date(2026, 9, 23, 22, 29)],
-    ['5 分鐘前', new Date(2026, 9, 23, 22, 25)],
-    ['2 小時前', new Date(2026, 9, 23, 20, 30)],
-    ['昨天 22:13', new Date(2026, 9, 22, 22, 13)],
-    ['前天 09:05', new Date(2026, 9, 21, 9, 5)],
-    ['2026.06.21 20:35', new Date(2026, 5, 21, 20, 35)],
-  ])('%s', (text, expected) => {
-    expect(parseHistoryDate(text, now)).toBe(expected.toISOString());
+describe('parseApiTime', () => {
+  it('以台灣時間解讀', () => {
+    expect(parseApiTime('2026-10-24 10:24:58')).toBe('2026-10-24T02:24:58.000Z');
   });
-
-  it('無法辨識時回傳 undefined', () => {
-    expect(parseHistoryDate('很久以前', now)).toBeUndefined();
+  it('格式不符時回傳 undefined', () => {
+    expect(parseApiTime('昨天 22:13')).toBeUndefined();
   });
 });
 
-describe('parseHistoryPage', () => {
-  const doc = new DOMParser().parseFromString(`<!doctype html><body>${html}</body>`, 'text/html');
-  const result = parseHistoryPage(doc, now);
-
-  it('解析所有動畫與各集紀錄', () => {
-    expect(result.animeCount).toBe(2);
-    expect(result.missingDetail).toBe(0);
-    expect(result.items).toHaveLength(3 + 3);
+describe('parseHistoryResponse', () => {
+  it('每集一筆，進度只屬於最近一集', () => {
+    const { items } = parseHistoryResponse(page([anime()]));
+    expect(items).toEqual([
+      {
+        animeSn: '113845',
+        title: '殺手旅店',
+        coverUrl: 'https://p2.bahamut.com.tw/B/ACG/c/94/0000142294.JPG',
+        videoSn: '51805',
+        episodeLabel: '16',
+        watchedAt: '2026-10-23T13:00:00.000Z',
+        lastSeenAt: '2026-10-23T13:22:00.000Z',
+        progressSec: 1303,
+        durationSec: 23 * 60,
+      },
+      {
+        animeSn: '113845',
+        title: '殺手旅店',
+        coverUrl: 'https://p2.bahamut.com.tw/B/ACG/c/94/0000142294.JPG',
+        videoSn: '51804',
+        episodeLabel: '15',
+        watchedAt: '2026-10-23T12:30:00.000Z',
+      },
+    ]);
   });
 
-  it('最新一集帶有進度', () => {
-    expect(result.items[0]).toEqual({
-      animeSn: '113281',
-      title: '咒術迴戰 第二季',
-      coverUrl: 'https://p2.bahamut.com.tw/B/ACG/c/78/0000122778.JPG',
-      videoSn: '34716',
-      episodeLabel: '31',
-      watchedAt: new Date(2026, 9, 23, 22, 29).toISOString(),
-      progressSec: 17 * 60 + 58,
-      durationSec: Math.round((17 * 60 + 58) / 0.781159420289855),
-    });
-    expect(result.items[1]).not.toHaveProperty('progressSec');
+  it('breakPoint 為 -1 時視為看完；沒有進度時不帶', () => {
+    const done = parseHistoryResponse(page([anime({ breakPoint: { breakPoint: -1, watchTime: '2026-10-23 21:22:00' } })]));
+    expect(done.items[0]).toMatchObject({ completed: true });
+    expect(done.items[0]).not.toHaveProperty('progressSec');
+    const none = parseHistoryResponse(page([anime({ breakPoint: [] })]));
+    expect(none.items[0]).not.toHaveProperty('progressSec');
   });
 
-  it('「觀看結束」視為看完；lazyload 的封面取 data-src', () => {
-    const last = result.items.find((i) => i.videoSn === '51351');
-    expect(last).toMatchObject({
-      animeSn: '114058',
-      episodeLabel: '22',
-      completed: true,
-      coverUrl: 'https://p2.bahamut.com.tw/B/ACG/c/75/0000142675.JPG',
+  it('未登入時拋出錯誤', () => {
+    expect(() =>
+      parseHistoryResponse({ error: { code: 401, message: '尚未登入', status: 'NO_LOGIN' } }),
+    ).toThrow('尚未登入動畫瘋');
+  });
+});
+
+describe('fetchHistory', () => {
+  const pages = [
+    page([anime({ watchTime: '2026-10-23 21:00:00' })], 3),
+    page([anime({ animeSn: 2, watchTime: '2026-10-10 21:00:00', history: [] })], 3),
+    page([anime({ animeSn: 3, watchTime: '2026-09-01 21:00:00', history: [] })], 3),
+  ];
+  const fakeFetch = () =>
+    vi.fn(async (url: string | URL | Request) => {
+      const n = Number(new URL(String(url)).searchParams.get('page'));
+      return new Response(JSON.stringify(pages[n - 1]));
     });
+
+  it('沒有 since 時讀完所有頁', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 1000 });
+    const f = fakeFetch();
+    await fetchHistory({ fetch: f as typeof fetch });
+    expect(f).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
+  it('讀到比 since 更早的頁就停止', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 1000 });
+    const f = fakeFetch();
+    await fetchHistory({ fetch: f as typeof fetch, since: '2026-10-20T00:00:00.000Z' });
+    expect(f).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+});
+
+describe('isSyncDue', () => {
+  const now = Date.parse('2026-10-24T12:00:00.000Z');
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  it.each([
+    ['從未同步', {}, true],
+    ['成功後未滿 6 小時', { lastRunAt: ago(AUTO_SYNC_INTERVAL_MS - 1), ok: true }, false],
+    ['成功後滿 6 小時', { lastRunAt: ago(AUTO_SYNC_INTERVAL_MS), ok: true }, true],
+    ['失敗後 1 小時重試', { lastRunAt: ago(3_600_000), ok: false }, true],
+    ['正在同步', { runningSince: ago(60_000) }, false],
+  ])('%s', (_name, state, expected) => {
+    expect(isSyncDue(state, now)).toBe(expected);
   });
 });

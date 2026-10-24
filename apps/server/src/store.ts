@@ -60,8 +60,14 @@ interface ReviewRow {
 export class NotFoundError extends Error {}
 
 const now = () => new Date().toISOString();
-/** 匯入時，同一集在這個時間範圍內已有紀錄就視為重複 */
-const IMPORT_DEDUPE_MINUTES = 30;
+/**
+ * 匯入時判斷「同一次觀看」的時間範圍（分鐘）：
+ * - 與之前匯入的紀錄比對：動畫瘋的時間精確到秒，只容許舊版以頁面匯入時的分鐘誤差。
+ *   同一集重看會在動畫瘋被覆蓋成新的時間，這裡要保留成兩筆。
+ * - 與本機自動記錄比對：兩邊的開始時間來源不同，放寬範圍。
+ */
+const IMPORT_MATCH_MINUTES = 2;
+const AUTO_MATCH_MINUTES = 30;
 
 /** 由集數標籤推算排序；播放頁建檔時會以實際順序覆蓋 */
 function labelOrder(label?: string): number | undefined {
@@ -375,15 +381,18 @@ export class Store {
   }
 
   /**
-   * 匯入動畫瘋觀看紀錄。同一集在前後 IMPORT_DEDUPE_MINUTES 內已有紀錄就略過，
-   * 所以重複匯入、或與自動記錄重疊都不會產生重複資料。
+   * 匯入動畫瘋觀看紀錄。已匯入過的同一筆只更新進度；與自動記錄重疊的略過；
+   * 其餘（包含重看同一集）都新增，所以不會因為動畫瘋覆蓋紀錄而遺失。
    */
   importWatches(items: BahamutImportItem[]): ImportResult & { covers: [string, string][] } {
     return transaction(this.db, () => {
-      const result = { imported: 0, skipped: 0, covers: [] as [string, string][] };
+      const result = { imported: 0, updated: 0, skipped: 0, covers: [] as [string, string][] };
       const near = this.db.prepare(
-        `SELECT 1 FROM watch_event WHERE episode_id = ?
-         AND ABS(julianday(started_at) - julianday(?)) * 1440 < ? LIMIT 1`,
+        `SELECT id, progress_sec, duration_sec, completed FROM watch_event
+         WHERE episode_id = ? AND source = ? AND ABS(julianday(started_at) - julianday(?)) * 1440 < ? LIMIT 1`,
+      );
+      const update = this.db.prepare(
+        'UPDATE watch_event SET progress_sec = ?, duration_sec = ?, completed = ?, last_seen_at = MAX(last_seen_at, ?) WHERE id = ?',
       );
       const insert = this.db.prepare(
         `INSERT INTO watch_event (id, episode_id, anime_id, started_at, last_seen_at, progress_sec, duration_sec, completed, source)
@@ -407,14 +416,32 @@ export class Store {
           | undefined;
         // 已建檔的集數保留播放頁取得的名稱與順序
         const episodeId = known?.id ?? this.upsertEpisode(animeId, item.videoSn, item.episodeLabel, labelOrder(item.episodeLabel));
-        if (near.get(episodeId, item.watchedAt, IMPORT_DEDUPE_MINUTES)) {
-          result.skipped++;
-          continue;
-        }
         const duration = item.durationSec ?? 0;
         const progress = item.progressSec ?? 0;
         const completed = item.completed || (duration > 0 && progress / duration >= COMPLETED_RATIO);
-        insert.run(ulid(), episodeId, animeId, item.watchedAt, item.watchedAt, progress, duration, completed ? 1 : 0);
+        const seenAt = item.lastSeenAt ?? item.watchedAt;
+
+        if (near.get(episodeId, 'auto', item.watchedAt, AUTO_MATCH_MINUTES)) {
+          result.skipped++;
+          continue;
+        }
+        const prev = near.get(episodeId, 'import', item.watchedAt, IMPORT_MATCH_MINUTES) as
+          | { id: string; progress_sec: number; duration_sec: number; completed: number }
+          | undefined;
+        if (prev) {
+          // 同一次觀看在動畫瘋上的進度可能還在增加
+          const next = {
+            progress: Math.max(prev.progress_sec, progress),
+            duration: Math.max(prev.duration_sec, duration),
+            completed: prev.completed || completed ? 1 : 0,
+          };
+          if (next.progress !== prev.progress_sec || next.duration !== prev.duration_sec || next.completed !== prev.completed) {
+            update.run(next.progress, next.duration, next.completed, seenAt, prev.id);
+            result.updated++;
+          } else result.skipped++;
+          continue;
+        }
+        insert.run(ulid(), episodeId, animeId, item.watchedAt, seenAt, progress, duration, completed ? 1 : 0);
         result.imported++;
       }
       return result;

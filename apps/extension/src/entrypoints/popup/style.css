@@ -24,3 +24,5 @@ label.check { flex-direction: row; align-items: center; gap: 6px; }
 select, input:not([type]) { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
 details summary { cursor: pointer; color: var(--muted); }
 details label { margin-top: 8px; }
+.sync { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.sync button { align-self: flex-start; }

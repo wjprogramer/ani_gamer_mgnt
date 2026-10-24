@@ -2,13 +2,23 @@ import { useEffect, useState } from 'react';
 import { browser } from '#imports';
 import { DEFAULT_SERVER_URL } from '@agm/shared';
 import { send, type HealthResult } from '../../lib/messages.ts';
-import { hideModeItem, serverUrlItem, showHiddenItem, type HideMode } from '../../lib/storage.ts';
+import {
+  autoSyncItem,
+  hideModeItem,
+  historySyncItem,
+  serverUrlItem,
+  showHiddenItem,
+  type HideMode,
+  type HistorySyncState,
+} from '../../lib/storage.ts';
 
 export function App() {
   const [health, setHealth] = useState<HealthResult | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [mode, setMode] = useState<HideMode>('collapse');
   const [url, setUrl] = useState('');
+  const [autoSync, setAutoSync] = useState(true);
+  const [syncState, setSyncState] = useState<HistorySyncState>({});
 
   const check = () => void send({ type: 'flush' }).then(setHealth);
 
@@ -17,6 +27,9 @@ export function App() {
     void showHiddenItem.getValue().then(setShowHidden);
     void hideModeItem.getValue().then(setMode);
     void serverUrlItem.getValue().then(setUrl);
+    void autoSyncItem.getValue().then(setAutoSync);
+    void historySyncItem.getValue().then(setSyncState);
+    return historySyncItem.watch(setSyncState);
   }, []);
 
   function saveUrl() {
@@ -47,6 +60,35 @@ export function App() {
       >
         開啟管理頁
       </button>
+
+      <section className="sync">
+        <div>
+          <strong>觀看紀錄同步</strong>
+          <span className="small">
+            {' '}
+            {syncState.runningSince
+              ? '同步中…'
+              : syncState.lastRunAt
+                ? `${new Date(syncState.lastRunAt).toLocaleString()} ${syncState.ok ? '✓' : '✗'}`
+                : '尚未同步'}
+          </span>
+        </div>
+        {syncState.message && !syncState.runningSince && <div className="small">{syncState.message}</div>}
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={autoSync}
+            onChange={(e) => {
+              setAutoSync(e.target.checked);
+              void autoSyncItem.setValue(e.target.checked);
+            }}
+          />
+          每 6 小時自動同步（其他裝置看的也會收進來）
+        </label>
+        <button disabled={!health?.online || !!syncState.runningSince} onClick={() => void send({ type: 'syncHistory', full: true })}>
+          立即完整同步
+        </button>
+      </section>
 
       <label className="check">
         <input

@@ -1,5 +1,5 @@
 import { storage } from '#imports';
-import { DEFAULT_SERVER_URL } from '@agm/shared';
+import { DEFAULT_SERVER_URL, type ImportResult } from '@agm/shared';
 
 export type HideMode = 'collapse' | 'remove';
 
@@ -22,3 +22,18 @@ export const hiddenSnsItem = storage.defineItem<string[]>('local:hiddenSns', { f
 export const serverOnlineItem = storage.defineItem<boolean>('local:serverOnline', { fallback: false });
 /** server 離線時暫存的寫入請求 */
 export const queueItem = storage.defineItem<QueueItem[]>('local:queue', { fallback: [] });
+
+export interface HistorySyncState {
+  lastRunAt?: string;
+  ok?: boolean;
+  message?: string;
+  result?: ImportResult;
+  /** 已同步到的最新觀看時間，下次只需讀到這裡 */
+  latestWatchedAt?: string;
+  /** 同步進行中（避免背景與觀看紀錄頁同時執行） */
+  runningSince?: string;
+}
+
+/** 定時同步動畫瘋觀看紀錄 */
+export const autoSyncItem = storage.defineItem<boolean>('local:autoSyncHistory', { fallback: true });
+export const historySyncItem = storage.defineItem<HistorySyncState>('local:historySync', { fallback: {} });

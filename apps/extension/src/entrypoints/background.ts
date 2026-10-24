@@ -2,10 +2,14 @@ import { browser, defineBackground } from '#imports';
 import type { SnMap } from '@agm/shared';
 import { animeSnFromVideoHtml } from '../bahamut/parse.ts';
 import type { HealthResult, Message, QueryResult } from '../lib/messages.ts';
+import { syncHistory, type SyncDeps } from '../lib/history-sync.ts';
+import { isSyncDue } from '../lib/sync-due.ts';
 import { WriteQueue } from '../lib/queue.ts';
-import { hiddenSnsItem, queueItem, serverOnlineItem, serverUrlItem } from '../lib/storage.ts';
+import { autoSyncItem, hiddenSnsItem, historySyncItem, queueItem, serverOnlineItem, serverUrlItem } from '../lib/storage.ts';
 
 const HEALTH_ALARM = 'health';
+/** 每小時檢查一次，實際同步間隔見 AUTO_SYNC_INTERVAL_MS */
+const HISTORY_ALARM = 'history';
 /** 背景抓播放頁的間隔，避免對動畫瘋造成負擔 */
 const RESOLVE_INTERVAL_MS = 1500;
 const RESOLVE_MAX_PER_CALL = 20;
@@ -117,6 +121,16 @@ async function resolveSn(videoSns: string[]): Promise<SnMap> {
   return result;
 }
 
+// ---- 觀看紀錄同步 ----
+
+const syncDeps: SyncDeps = { fetch: (input, init) => fetch(input, init), query: query as SyncDeps['query'] };
+
+async function autoSyncHistory() {
+  if (!(await autoSyncItem.getValue())) return;
+  if (!(await serverOnlineItem.getValue())) return;
+  if (isSyncDue(await historySyncItem.getValue())) await syncHistory(syncDeps);
+}
+
 async function handle(msg: Message): Promise<unknown> {
   switch (msg.type) {
     case 'health':
@@ -130,6 +144,8 @@ async function handle(msg: Message): Promise<unknown> {
       return query(msg.method, msg.path, msg.body);
     case 'resolveSn':
       return resolveSn(msg.videoSns);
+    case 'syncHistory':
+      return syncHistory(syncDeps, msg.full);
   }
 }
 
@@ -140,9 +156,14 @@ export default defineBackground(() => {
   });
 
   browser.alarms.create(HEALTH_ALARM, { periodInMinutes: 0.5 });
+  // service worker 每次喚醒都會執行這裡；重建會重設計時，所以只在不存在時建立
+  void browser.alarms.get(HISTORY_ALARM).then(async (a) => {
+    if (!a) await browser.alarms.create(HISTORY_ALARM, { periodInMinutes: 60 });
+  });
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === HEALTH_ALARM) void sync();
+    if (alarm.name === HISTORY_ALARM) void autoSyncHistory();
   });
   serverUrlItem.watch(() => void sync());
-  void sync();
+  void sync().then(autoSyncHistory);
 });

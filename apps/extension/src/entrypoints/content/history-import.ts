@@ -1,10 +1,10 @@
-import type { ImportResult } from '@agm/shared';
-import { parseHistoryPage } from '../../bahamut/history.ts';
 import { query } from '../../lib/messages.ts';
+import { syncHistory, type SyncDeps } from '../../lib/history-sync.ts';
 
-const CHUNK = 500;
-
-/** 在觀看紀錄頁加上「匯入」按鈕；只有使用者按下才會匯入 */
+/**
+ * 開啟觀看紀錄頁時自動同步，並提供「完整同步」按鈕。
+ * 在頁面裡讀 API（與頁面本身相同的來源與登入狀態），不依賴背景能否帶上 cookie。
+ */
 export function initHistoryImport(signal: AbortSignal) {
   const anchor = document.querySelector('.theme-title-block');
   if (!anchor) return;
@@ -14,43 +14,27 @@ export function initHistoryImport(signal: AbortSignal) {
   const text = document.createElement('span');
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.textContent = '匯入到動畫瘋管理工具';
+  btn.textContent = '完整同步';
+  btn.title = '重新讀取全部觀看紀錄（約一年內）';
   bar.append(text, btn);
   anchor.after(bar);
   signal.addEventListener('abort', () => bar.remove());
 
-  const describe = () => {
-    const { items, animeCount } = parseHistoryPage(document);
-    text.textContent = `目前頁面已載入 ${animeCount} 部動畫、${items.length} 筆紀錄。要匯入更早的紀錄，請先按頁面底部的展開按鈕載入。`;
+  const deps: SyncDeps = {
+    fetch: (input, init) => fetch(input, init),
+    query,
+    onProgress: (t) => (text.textContent = t),
   };
-  describe();
-  // 只觀察列表本身；觀察 body 會因為更新 bar 的文字而無限觸發
-  const list = document.querySelector('.history-wrapper');
-  if (list) {
-    const observer = new MutationObserver(() => !btn.disabled && describe());
-    observer.observe(list, { childList: true, subtree: true });
-    signal.addEventListener('abort', () => observer.disconnect());
-  }
 
-  btn.addEventListener('click', async () => {
-    const { items } = parseHistoryPage(document);
-    if (!items.length) return;
+  const run = async (full: boolean) => {
     btn.disabled = true;
-    const total: ImportResult = { imported: 0, skipped: 0 };
-    for (let i = 0; i < items.length; i += CHUNK) {
-      text.textContent = `匯入中… ${i} / ${items.length}`;
-      const res = await query<ImportResult>('POST', '/bahamut/import', { items: items.slice(i, i + CHUNK) });
-      if (!res.ok) {
-        text.textContent = res.offline
-          ? '本機 server 未啟動，請先執行 npm start 再匯入。'
-          : `匯入失敗：${res.error ?? res.status}`;
-        btn.disabled = false;
-        return;
-      }
-      total.imported += res.data.imported;
-      total.skipped += res.data.skipped;
-    }
-    text.textContent = `匯入完成：新增 ${total.imported} 筆，略過 ${total.skipped} 筆已存在的紀錄。`;
+    const state = await syncHistory(deps, full);
+    if (signal.aborted) return;
+    text.textContent = state.runningSince
+      ? '背景正在同步，請稍後重新整理。'
+      : `${state.ok ? '已同步到本機' : '同步失敗'}：${state.message ?? ''}`;
     btn.disabled = false;
-  });
+  };
+  btn.addEventListener('click', () => void run(true));
+  void run(false);
 }
