@@ -43,7 +43,7 @@
 <main>
 
 <h1>動畫瘋個人管理工具：可行性評估</h1>
-<p class="meta">狀態：M0–M5 已實作・建立日期：2026-10-23・最後更新：2026-10-23（實作時的調整見第 5 節「實作時的調整」）</p>
+<p class="meta">狀態：M0–M6 已實作・建立日期：2026-10-23・最後更新：2026-10-24（實作時的調整見第 5 節「實作時的調整」）</p>
 
 <div class="callout">
   <strong>結論：</strong>四項需求都可行。架構採 <strong>Chrome Extension + 本機 Server</strong>：資料一開始就以實體檔案（SQLite + 封面圖檔）存在硬碟上；server 沒開時，extension 要主動提醒。
@@ -69,7 +69,7 @@
     <tr><td>資料儲存</td><td>一開始就存成本機檔案（SQLite + 封面圖檔），由本機 server 負責</td></tr>
     <tr><td>Server</td><td>固定要啟動本機 server；沒啟動時 extension 要提醒</td></tr>
     <tr><td>多電腦／多瀏覽器</td><td>不需要，不做同步</td></tr>
-    <tr><td>其他裝置（手機、電視）的觀看紀錄</td><td>不處理</td></tr>
+    <tr><td>其他裝置（手機、電視）的觀看紀錄</td><td>2026-10-24 更新：動畫瘋的觀看紀錄跟著帳號走，定期同步動畫瘋的紀錄就能收進來（見 M6）</td></tr>
     <tr><td>續作</td><td>不一起處理，每一季都是獨立的動畫</td></tr>
     <tr><td>匯入動畫瘋既有觀看紀錄</td><td>做成可選功能，由使用者自行決定是否匯入</td></tr>
     <tr><td>排除廣告、年齡確認，以及重新整理或續看造成的重複紀錄</td><td>列為 TODO，暫不實作（目前帳號是會員且已通過年齡驗證；開放給其他人使用時再處理）</td></tr>
@@ -165,6 +165,7 @@
     <tr><td>pnpm workspaces</td><td>npm workspaces</td><td>環境沒有安裝 pnpm，npm 內建即可</td></tr>
     <tr><td>better-sqlite3 + Drizzle</td><td><code>node:sqlite</code> + 自寫 SQL 遷移</td><td>better-sqlite3 需要針對 Node 版本編譯原生模組；資料表不多，手寫 SQL 已足夠</td></tr>
     <tr><td>API 需帶本機 token</td><td>檢查 Host 與 Origin</td><td>瀏覽器無法偽造 Origin，效果相同，且不必手動把 token 貼進 extension</td></tr>
+    <tr><td>解析觀看紀錄頁的 DOM 來匯入</td><td>直接讀觀看紀錄 API</td><td>頁面內容本來就是 API 載入的；API 的時間精確到秒，且不用手動展開更早的月份</td></tr>
     <tr><td>卡片需要「單集 sn → 動畫 sn」對應</td><td>多數卡片直接帶動畫 sn，只有週期表需要對應</td><td>見 <a href="bahamut-dom.html">頁面結構調查</a></td></tr>
   </tbody>
 </table>
@@ -239,7 +240,22 @@ sn_cache         source, episode_sn, anime_sn, fetched_at</code></pre>
   <li>✅ <strong>M3 隱藏與觀看狀態</strong>：卡片按鈕、sn 對應快取、標章、隱藏清單管理。</li>
   <li>✅ <strong>M4 評論與管理頁</strong>：評論面板；管理頁可瀏覽動畫、觀看紀錄、評論與隱藏清單。</li>
   <li>✅ <strong>M5 可選匯入</strong>：在觀看紀錄頁加上匯入按鈕，由使用者自行決定是否匯入。</li>
+  <li>✅ <strong>M6 觀看紀錄同步</strong>：背景每 6 小時、以及開啟觀看紀錄頁時，同步動畫瘋的觀看紀錄（含其他裝置看的）。動畫瘋上同一集重看會覆蓋舊時間，本機則保留每一次。</li>
 </ol>
+
+<h3>M6 的重複判斷</h3>
+<p>動畫瘋的觀看紀錄沒有每筆的 id，每集只留最近一次的時間（例如依序看 1、2、3 集再重看第 1 集，動畫瘋只剩 1、3、2）。因此以「同一集＋開始時間」判斷：</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>比對對象</th><th>視為同一次的範圍</th><th>處理</th></tr></thead>
+  <tbody>
+    <tr><td>之前同步過的紀錄</td><td>2 分鐘內（API 精確到秒，只容許舊版以頁面匯入的分鐘誤差）</td><td>進度有增加就更新，否則略過</td></tr>
+    <tr><td>本機播放時的自動記錄</td><td>30 分鐘內（兩邊的開始時間來源不同）</td><td>略過，以自動記錄為準</td></tr>
+    <tr><td>都不符合</td><td>—</td><td>新增，所以重看會保留成 1、3、2、1 共四筆</td></tr>
+  </tbody>
+</table>
+</div>
+<p>限制：只有同步時還留在動畫瘋上的紀錄才收得到。兩次同步之間在其他裝置重看同一集兩次，較早那次會被動畫瘋覆蓋；保存期限約 1 年。除了最近看的那一集，其他集沒有進度。</p>
 </section>
 
 </main>

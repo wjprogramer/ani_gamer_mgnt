@@ -81,7 +81,26 @@
   <li>封面圖片不檢查 Referer，server 可以直接下載。</li>
   </ul>
 
-<h2>5. 觀看紀錄頁 <code>viewList.php</code>（需登入）</h2>
+<h2>5. 觀看紀錄 API（需登入）</h2>
+<p>調查日期：2026-10-24。<code>viewList.php</code> 的內容是由 <code>GET https://api.gamer.com.tw/anime/v3/history.php?page=N</code> 載入的，extension 直接讀這個 API（對應程式碼在 <code>src/bahamut/history.ts</code>）。</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>欄位</th><th>說明</th></tr></thead>
+  <tbody>
+    <tr><td><code>data.totalPage</code></td><td>總頁數；每頁 30 部動畫</td></tr>
+    <tr><td><code>data.history[]</code></td><td>每部動畫一筆，依最近觀看時間由新到舊</td></tr>
+    <tr><td><code>animeSn</code>、<code>videoSn</code></td><td>動畫，與最近看的那一集（數字）</td></tr>
+    <tr><td><code>title</code>、<code>cover</code></td><td>名稱、封面網址</td></tr>
+    <tr><td><code>duration</code></td><td>最近那一集的片長（分鐘）</td></tr>
+    <tr><td><code>watchTime</code></td><td>「2026-10-24 10:24:58」格式，台灣時間、無時區，為開始觀看的時間</td></tr>
+    <tr><td><code>breakPoint</code></td><td><code>{ breakPoint, watchTime }</code>：最近那一集的進度秒數，<code>-1</code> 表示看完；<code>watchTime</code> 是最後回報進度的時間。沒有進度時可能是空陣列</td></tr>
+    <tr><td><code>history[]</code></td><td>各集 <code>{ videoSn, title, watchTime }</code>，新到舊；<code>title</code> 結尾的「[16]」是集數。<strong>每集只有一筆</strong>，重看會覆蓋成新的時間</td></tr>
+    <tr><td>未登入</td><td>HTTP 200，內容為 <code>{"error":{"code":401,"status":"NO_LOGIN"}}</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>舊版：解析頁面 DOM（已不使用）</h3>
 <p>調查方式：使用者在登入狀態下另存頁面 HTML。頁面說明觀看紀錄保存期限為 1 年。</p>
 <div class="table-wrap">
 <table>
