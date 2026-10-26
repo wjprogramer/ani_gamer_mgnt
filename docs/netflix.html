@@ -29,10 +29,10 @@
 <body>
 <main>
 <h1>Netflix 支援調查</h1>
-<p class="meta">調查日期：2026-10-26・方式：在登入狀態下檢查頁面 DOM 與網路請求（未播放影片，以免新增觀看紀錄）。網站改版後需重新驗證。</p>
+<p class="meta">調查日期：2026-10-26・方式：在登入狀態下檢查頁面 DOM、網路請求與播放頁（使用者播放一集後）。網站改版後需重新驗證。對應程式碼在 <code>apps/extension/src/netflix/</code>。</p>
 
 <div class="callout">
-  <strong>結論：可行，但觀看紀錄比動畫瘋粗。</strong>Netflix 的觀影動態<strong>只有日期、沒有時間與進度</strong>，所以同步回來的紀錄只能精確到「哪一天看了哪一集」。在這台電腦上播放時，仍可像動畫瘋一樣精確記錄時間與進度。資料表原本就以 <code>source + external_id</code> 設計，不需要改結構。
+  <strong>結論：已實作。</strong>觀影動態頁本身只有日期，但每部作品的 metadata API 帶有各集的 <code>bookmark</code>（最後觀看時間精確到毫秒、播放位置），所以同步回來的紀錄也能有時間與進度。範圍是 Netflix 上的所有影集與電影；與動畫瘋的同一部作品不自動合併，由管理頁的「合併」頁處理。
 </div>
 
 <section>
@@ -80,44 +80,59 @@
   </tbody>
 </table>
 </div>
-<p>觀察到的 70 筆中，同一集沒有重複出現，推測與動畫瘋一樣<strong>每集只留最近一次的日期</strong>，重看會覆蓋。<span class="todo">待驗證：重看已看過的一集後，舊的那筆是否消失。</span></p>
+<p>觀察到的 70 筆中，同一集沒有重複出現；播放中的那一集只出現一次且在最上面，推測與動畫瘋一樣<strong>每集只留最近一次</strong>，重看會覆蓋。</p>
 </section>
 
 <section>
 <h2>4. 播放頁 <code>/watch/&lt;影片 ID&gt;</code></h2>
-<p class="todo">未實地確認（避免新增觀看紀錄）。實作前需要使用者播放一集後再調查：</p>
-<ul>
-  <li>影片 ID 在網址上；換集時網址會變，但不一定重新載入頁面（同動畫瘋的處理方式）。</li>
-  <li>頁面上有 <code>&lt;video&gt;</code>，可沿用現有的 <code>trackWatch</code>（播放、暫停、進度回報）。</li>
-  <li>作品 ID、名稱、集數需要從播放器的標題區或頁面資料取得，選擇器待確認。</li>
-</ul>
-</section>
-
-<section>
-<h2>5. 與現有架構的差異</h2>
 <div class="table-wrap">
 <table>
-  <thead><tr><th>項目</th><th>動畫瘋</th><th>Netflix</th></tr></thead>
+  <thead><tr><th>資料</th><th>來源</th></tr></thead>
   <tbody>
-    <tr><td>同步的時間精確度</td><td>秒</td><td>日期</td></tr>
-    <tr><td>同步的進度</td><td>最近一集有</td><td>沒有</td></tr>
-    <tr><td>觀看紀錄 → 作品</td><td>直接帶 animeSn</td><td>只有影片 ID，要另外查作品 ID；或先用名稱「作品：…」分組</td></tr>
-    <tr><td>同步方式</td><td>公開的 JSON API</td><td>falcor API 需授權參數；較簡單的做法是在觀影動態頁讀 DOM</td></tr>
-    <tr><td>重複判斷</td><td>同一集＋時間相近</td><td>同一集＋同一天（以本機時區）；同一天重看無法分辨</td></tr>
-    <tr><td>封面</td><td>固定網址</td><td>CDN 網址可能會失效，要在取得時就下載</td></tr>
-    <tr><td>範圍</td><td>都是動畫</td><td>有各種影片，需決定只處理動畫還是全部</td></tr>
+    <tr><td>影片 ID</td><td>網址；自動播下一集時網址會變，但不重新載入頁面</td></tr>
+    <tr><td>播放器</td><td>頁面上只有一個 <code>&lt;video&gt;</code>，<code>currentTime</code>、<code>duration</code> 可直接用</td></tr>
+    <tr><td>標題區</td><td><code>[data-uia="video-title"]</code>：<code>h4</code> 是作品名，接著是「第 N 集：」與集名</td></tr>
+    <tr><td>作品資料</td><td>用 metadata API 查（見下節），不讀頁面 JS 的變數（content script 讀不到）</td></tr>
   </tbody>
 </table>
 </div>
 </section>
 
 <section>
-<h2>6. 待決定</h2>
-<ol>
-  <li>只管理 Netflix 上的動畫，還是所有影集與電影？</li>
-  <li>同一部作品同時在動畫瘋與 Netflix 上時，是否合併成同一個本機 ID？（建議在管理頁手動合併，不自動比對名稱）</li>
-  <li>Netflix 的觀看紀錄同步也要自動嗎？（建議先做「開啟觀影動態頁時同步」，背景同步要先確認 API 的授權方式）</li>
-</ol>
+<h2>5. metadata API</h2>
+<p><code>GET https://www.netflix.com/nq/website/memberapi/release/metadata?movieid=&lt;影片 ID&gt;</code>，只需要登入 cookie。傳入單集 ID 也會回傳整部作品。</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>欄位</th><th>說明</th></tr></thead>
+  <tbody>
+    <tr><td><code>video.id</code>、<code>type</code>、<code>title</code></td><td>作品 ID、<code>show</code> 或 <code>movie</code>、名稱</td></tr>
+    <tr><td><code>video.boxart[]</code></td><td>直式封面 <code>{ w, h, url }</code>（例如 426×607）；卡片上的圖是橫式縮圖，不拿來當封面</td></tr>
+    <tr><td><code>video.seasons[].episodes[]</code></td><td><code>id</code>、<code>seq</code>（集數）、<code>runtime</code>（秒）、<code>creditsOffset</code>／<code>watchedToEndOffset</code>（片尾位置）、<code>bookmark</code></td></tr>
+    <tr><td><code>bookmark</code></td><td><code>{ offset, watchedDate }</code>：播放位置（秒）與最後觀看時間（毫秒）；沒看過的集數 <code>watchedDate</code> 為 0</td></tr>
+    <tr><td>電影</td><td>沒有 <code>seasons</code>，<code>runtime</code>、<code>bookmark</code> 在 <code>video</code> 上</td></tr>
+  </tbody>
+</table>
+</div>
+<p>實測：觀影動態的前 20 筆查了 8 次 metadata，得到 8 部作品、70 集有觀看紀錄（比頁面上載入的更多），其中 19 筆的日期與觀影動態一致。</p>
+</section>
+
+<section>
+<h2>6. 實作方式</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>功能</th><th>做法</th></tr></thead>
+  <tbody>
+    <tr><td>卡片</td><td>與動畫瘋共用卡片程式（隱藏按鈕、標章），以 <code>source</code> 區分</td></tr>
+    <tr><td>播放時記錄</td><td>播放頁查 metadata 建檔，沿用 <code>trackWatch</code></td></tr>
+    <tr><td>同步</td><td>開啟觀影動態頁時：依名稱分組，每部作品查一次 metadata（間隔 1 秒），把有 <code>bookmark</code> 的集數匯入；按「再次同步」會包含「顯示更多」後的紀錄</td></tr>
+    <tr><td>開始時間</td><td>Netflix 只記最後觀看時間，以「<code>watchedDate</code> − <code>offset</code>」推算；暫停過的話會比實際晚</td></tr>
+    <tr><td>重複判斷</td><td>改為比對觀看時段（開始～最後回報）是否重疊，兩個來源共用（見可行性評估 M6）</td></tr>
+    <tr><td>集數名稱</td><td>多季：「第 2 季第 43 集」；單季：「43」；電影：「電影」</td></tr>
+    <tr><td>API 路徑</td><td>與動畫瘋共用，改為 <code>/api/&lt;source&gt;/...</code>（<code>bahamut</code>、<code>netflix</code>）</td></tr>
+  </tbody>
+</table>
+</div>
+<p>限制：Netflix 的評論面板尚未加到頁面上，評論請在管理頁撰寫；背景定時同步未做（觀影動態 API 需要授權參數）。</p>
 </section>
 </main>
 </body>
