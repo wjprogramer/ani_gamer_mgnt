@@ -2,7 +2,8 @@ import {
   MOVIE_LABEL,
   SOURCE_LABELS,
   type AnimeDetail,
-  type AnimeFilter,
+  type AnimeGroup,
+  type AnimeListQuery,
   type AnimePatch,
   type AnimeSummary,
   type MergeCandidate,
@@ -26,8 +27,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  listAnime: (filter: AnimeFilter, q: string, site = '') =>
-    request<AnimeSummary[]>('GET', `/anime?${new URLSearchParams({ filter, q, site })}`),
+  listAnime: ({ groupId, rating, ...rest }: AnimeListQuery) => {
+    const params = Object.entries({ ...rest, group: groupId, rating: rating === undefined ? undefined : String(rating) });
+    const query = new URLSearchParams(params.filter((e): e is [string, string] => !!e[1]));
+    return request<AnimeSummary[]>('GET', `/anime?${query}`);
+  },
+  setAnimeGroups: (id: string, groupIds: string[]) => request<AnimeDetail>('PUT', `/anime/${id}/groups`, { groupIds }),
+  listGroups: () => request<AnimeGroup[]>('GET', '/groups'),
+  createGroup: (name: string) => request<AnimeGroup>('POST', '/groups', { name }),
+  renameGroup: (id: string, name: string) => request<AnimeGroup>('PATCH', `/groups/${id}`, { name }),
+  deleteGroup: (id: string) => request<null>('DELETE', `/groups/${id}`),
   getAnime: (id: string) => request<AnimeDetail>('GET', `/anime/${id}`),
   patchAnime: (id: string, patch: AnimePatch) => request<AnimeDetail>('PATCH', `/anime/${id}`, patch),
   watchHistory: (before?: string) =>

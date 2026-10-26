@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router';
-import { ulid, type AnimeDetail, type AnimeSummary, type Review } from '@agm/shared';
+import { ulid, type AnimeDetail, type AnimeGroup, type AnimeSummary, type Review } from '@agm/shared';
 import { api, episodeText, formatDuration, formatTime, progressText, siteLabel } from '../api.ts';
+import { FavoriteButton, Stars } from '../components.tsx';
 
 interface Draft {
   id: string | null;
@@ -14,6 +15,44 @@ interface Draft {
 const emptyDraft = (): Draft => ({ id: null, content: '', rating: null, spoiler: false });
 const canSave = (d: Draft) => d.content.trim() !== '' || d.rating !== null;
 
+/** 勾選作品所屬的分群，也可以直接新增分群 */
+function GroupPicker({ anime, onChange }: { anime: AnimeDetail; onChange: (a: AnimeDetail) => void }) {
+  const [groups, setGroups] = useState<AnimeGroup[]>([]);
+  const [name, setName] = useState('');
+  useEffect(() => void api.listGroups().then(setGroups), []);
+
+  const save = async (groupIds: string[]) => onChange(await api.setAnimeGroups(anime.id, groupIds));
+  const toggle = (id: string, on: boolean) =>
+    void save(on ? [...anime.groupIds, id] : anime.groupIds.filter((g) => g !== id));
+
+  async function create(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    const g = await api.createGroup(name.trim());
+    setGroups((list) => [...list, g]);
+    setName('');
+    await save([...anime.groupIds, g.id]);
+  }
+
+  return (
+    <div>
+      <div className="row">
+        {groups.map((g) => (
+          <label key={g.id} className="row small">
+            <input type="checkbox" checked={anime.groupIds.includes(g.id)} onChange={(e) => toggle(g.id, e.target.checked)} />
+            {g.name}
+          </label>
+        ))}
+        {groups.length === 0 && <span className="muted small">還沒有分群。</span>}
+      </div>
+      <form className="row merge-search" onSubmit={(e) => void create(e)}>
+        <input placeholder="新增分群並加入" value={name} maxLength={50} onChange={(e) => setName(e.target.value)} />
+        <button disabled={!name.trim()}>新增</button>
+      </form>
+    </div>
+  );
+}
+
 /** 搜尋其他作品併入目前這部（合併頁沒列出時使用） */
 function MergeSearch({ anime, onMerged }: { anime: AnimeDetail; onMerged: () => void }) {
   const [q, setQ] = useState('');
@@ -22,7 +61,7 @@ function MergeSearch({ anime, onMerged }: { anime: AnimeDetail; onMerged: () => 
   useEffect(() => {
     if (!q.trim()) return setResults([]);
     const timer = setTimeout(() => {
-      void api.listAnime('all', q.trim()).then((list) => setResults(list.filter((a) => a.id !== anime.id).slice(0, 10)));
+      void api.listAnime({ q: q.trim() }).then((list) => setResults(list.filter((a) => a.id !== anime.id).slice(0, 10)));
     }, 200);
     return () => clearTimeout(timer);
   }, [q, anime.id]);
@@ -66,6 +105,10 @@ export function AnimeDetailPage() {
 
   async function toggleHidden() {
     setAnime(await api.patchAnime(id, { hidden: !anime!.hidden }));
+  }
+
+  async function toggleFavorite() {
+    setAnime(await api.patchAnime(id, { favorite: !anime!.favorite }));
   }
 
   async function setManualCompleted(manualCompleted: boolean | null) {
@@ -112,7 +155,10 @@ export function AnimeDetailPage() {
       <div className="detail-head">
         {anime.coverUrl ? <img className="detail-cover" src={anime.coverUrl} alt="" /> : <div className="detail-cover no-cover">無封面</div>}
         <div className="grow">
-          <h1>{anime.title}</h1>
+          <h1 className="row">
+            {anime.title}
+            <FavoriteButton active={anime.favorite} onToggle={() => void toggleFavorite()} />
+          </h1>
           {tags.length > 0 && (
             <div className="tags">
               {tags.map((t) => (
@@ -141,6 +187,8 @@ export function AnimeDetailPage() {
                 </dd>
               </div>
             ))}
+            <dt>評分</dt>
+            <dd>{anime.rating ? <Stars rating={anime.rating} /> : <span className="muted">未評分</span>}</dd>
             <dt>進度</dt>
             <dd>
               {progressText(anime)}
@@ -222,6 +270,11 @@ export function AnimeDetailPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section>
+        <h2>分群</h2>
+        <GroupPicker anime={anime} onChange={setAnime} />
       </section>
 
       <section>

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { HashRouter, NavLink, Route, Routes } from 'react-router';
 import { AnimeDetailPage } from './pages/AnimeDetailPage.tsx';
 import { AnimeListPage } from './pages/AnimeListPage.tsx';
+import { GroupsPage } from './pages/GroupsPage.tsx';
 import { HistoryPage } from './pages/HistoryPage.tsx';
 import { MergePage } from './pages/MergePage.tsx';
 import './style.css';
@@ -17,6 +18,7 @@ function App() {
             作品
           </NavLink>
           <NavLink to="/history">觀看紀錄</NavLink>
+          <NavLink to="/groups">分群</NavLink>
           <NavLink to="/merge">合併</NavLink>
         </nav>
       </header>
@@ -25,6 +27,7 @@ function App() {
           <Route path="/" element={<AnimeListPage />} />
           <Route path="/anime/:id" element={<AnimeDetailPage />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/groups" element={<GroupsPage />} />
           <Route path="/merge" element={<MergePage />} />
         </Routes>
       </main>
