@@ -89,7 +89,7 @@ export function ReviewPanel({ info }: { info: VideoPageInfo }) {
       'POST',
       '/bahamut/hide',
       { animeSn: info.animeSn, hidden: !hidden, title: info.title, coverUrl: info.coverUrl, at: new Date().toISOString() },
-      `hide:${info.animeSn}`,
+      `hide:bahamut:${info.animeSn}`,
     );
   }
 

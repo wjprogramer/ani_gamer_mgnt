@@ -1,11 +1,11 @@
 import { browser, defineBackground } from '#imports';
-import type { SnMap } from '@agm/shared';
+import { SOURCES, type SnMap } from '@agm/shared';
 import { animeSnFromVideoHtml } from '../bahamut/parse.ts';
 import type { HealthResult, Message, QueryResult } from '../lib/messages.ts';
 import { syncHistory, type SyncDeps } from '../lib/history-sync.ts';
 import { isSyncDue } from '../lib/sync-due.ts';
 import { WriteQueue } from '../lib/queue.ts';
-import { autoSyncItem, hiddenSnsItem, historySyncItem, queueItem, serverOnlineItem, serverUrlItem } from '../lib/storage.ts';
+import { autoSyncItem, hiddenItems, historySyncItem, queueItem, serverOnlineItem, serverUrlItem } from '../lib/storage.ts';
 
 const HEALTH_ALARM = 'health';
 /** 每小時檢查一次，實際同步間隔見 AUTO_SYNC_INTERVAL_MS */
@@ -50,8 +50,10 @@ async function sync(): Promise<HealthResult> {
     // 佇列清空後才用 server 的資料覆蓋，以免蓋掉尚未送出的隱藏操作
     if (result === 'done') {
       try {
-        const res = await request('GET', '/bahamut/hidden');
-        if (res.ok) await hiddenSnsItem.setValue(await res.json());
+        for (const source of SOURCES) {
+          const res = await request('GET', `/${source}/hidden`);
+          if (res.ok) await hiddenItems[source].setValue(await res.json());
+        }
       } catch {
         online = false;
       }

@@ -1,10 +1,11 @@
 import { createShadowRootUi, defineContentScript, type ContentScriptContext } from '#imports';
 import { createRoot } from 'react-dom/client';
 import { isHistoryPage } from '../../bahamut/history.ts';
-import { isVideoPage, parseVideoPage } from '../../bahamut/parse.ts';
-import { mutate, send } from '../../lib/messages.ts';
+import { findCards, isVideoPage, parseVideoPage } from '../../bahamut/parse.ts';
+import { mutate } from '../../lib/messages.ts';
 import { startCards } from './cards.ts';
 import { initHistoryImport } from './history-import.ts';
+import { warnIfOffline } from './notice.ts';
 import { injectPageStyle } from './page-style.ts';
 import { ReviewPanel } from './ReviewPanel.tsx';
 import { trackWatch } from './watch.ts';
@@ -22,7 +23,7 @@ export default defineContentScript({
 
     const cards = new AbortController();
     ctx.onInvalidated(() => cards.abort());
-    void startCards(cards.signal);
+    void startCards(cards.signal, 'bahamut', findCards);
 
     // 播放頁換集時不一定會重新載入頁面，以網址變化為準
     let page: AbortController | undefined;
@@ -59,9 +60,9 @@ async function initVideoPage(ctx: ContentScriptContext, signal: AbortSignal) {
       tags: info.tags,
       episodes: info.episodes,
     },
-    `anime:${info.animeSn}`,
+    `anime:bahamut:${info.animeSn}`,
   );
-  trackWatch(info, signal);
+  trackWatch('bahamut', info, signal);
 
   const anchor = document.querySelector('.anime_name');
   if (!anchor) return;
@@ -82,16 +83,4 @@ async function initVideoPage(ctx: ContentScriptContext, signal: AbortSignal) {
   if (signal.aborted) return;
   ui.mount();
   signal.addEventListener('abort', () => ui.remove());
-}
-
-async function warnIfOffline() {
-  const { online } = await send({ type: 'health' });
-  if (online || sessionStorage.getItem('agm-offline-warned')) return;
-  sessionStorage.setItem('agm-offline-warned', '1');
-  const toast = document.createElement('div');
-  toast.className = 'agm-toast';
-  toast.textContent = '動畫瘋管理工具：本機 server 未啟動，資料會先暫存，啟動後自動補送。（點擊關閉）';
-  toast.addEventListener('click', () => toast.remove());
-  document.body.append(toast);
-  setTimeout(() => toast.remove(), 10_000);
 }

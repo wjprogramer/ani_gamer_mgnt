@@ -1,4 +1,4 @@
-// 注入動畫瘋頁面的樣式（卡片按鈕、標章、提示）。評論面板在 shadow root 內，樣式另見 panel.css。
+// 注入動畫瘋與 Netflix 頁面的樣式（卡片按鈕、標章、提示）。評論面板在 shadow root 內，樣式另見 panel.css。
 const CSS = `
 .agm-card { position: relative !important; }
 .agm-controls {

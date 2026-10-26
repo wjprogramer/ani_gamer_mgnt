@@ -1,14 +1,20 @@
-import { ulid, type BahamutWatch } from '@agm/shared';
-import type { VideoPageInfo } from '../../bahamut/parse.ts';
+import { ulid, type BahamutWatch, type Source } from '@agm/shared';
 import { mutate } from '../../lib/messages.ts';
 
 const REPORT_INTERVAL_MS = 15_000;
+
+export interface WatchTarget {
+  animeSn: string;
+  title: string;
+  videoSn: string;
+  episodeLabel?: string;
+}
 
 /**
  * 第一次播放時建立一筆觀看紀錄，之後定期回報進度。
  * TODO: 排除片頭廣告、年齡確認，以及重新整理／續看造成的重複紀錄（見 docs/feasibility.html 第 7 節）。
  */
-export function trackWatch(info: VideoPageInfo, signal: AbortSignal) {
+export function trackWatch(source: Source, info: WatchTarget, signal: AbortSignal) {
   let watchId: string | undefined;
   let startedAt = '';
   let current: HTMLVideoElement | undefined;
@@ -27,7 +33,7 @@ export function trackWatch(info: VideoPageInfo, signal: AbortSignal) {
       progressSec: Math.floor(current.currentTime || 0),
       durationSec: Number.isFinite(current.duration) ? Math.floor(current.duration) : 0,
     };
-    void mutate('POST', '/bahamut/watch', body, `watch:${watchId}`);
+    void mutate('POST', `/${source}/watch`, body, `watch:${watchId}`);
   }
 
   function attach(video: HTMLVideoElement) {

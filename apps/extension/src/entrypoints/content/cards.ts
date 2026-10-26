@@ -1,7 +1,8 @@
-import type { CardStatus, SnMap } from '@agm/shared';
-import { findCards, type CardInfo } from '../../bahamut/parse.ts';
+import type { CardStatus, SnMap, Source } from '@agm/shared';
+import type { CardInfo } from '../../bahamut/parse.ts';
 import { mutate, query, send } from '../../lib/messages.ts';
-import { hiddenSnsItem, hideModeItem, showHiddenItem, type HideMode } from '../../lib/storage.ts';
+import { hiddenItems, hideModeItem, showHiddenItem, type HideMode } from '../../lib/storage.ts';
+import { MOVIE_LABEL } from '../../netflix/parse.ts';
 
 interface Card extends CardInfo {
   animeSn: string;
@@ -13,15 +14,20 @@ interface Card extends CardInfo {
 const SCAN_DEBOUNCE_MS = 200;
 
 export function episodeText(label: string) {
-  return /^\d+(\.\d+)?$/.test(label) ? `看到第 ${label} 集` : `看到 ${label}`;
+  if (label === MOVIE_LABEL) return '看過';
+  return /^\d+(\.\d+)?$/.test(label) ? `看到第 ${label} 集` : `看到${label}`;
 }
 
-/** 在所有動畫卡片上加上隱藏按鈕與觀看狀態 */
-export async function startCards(signal: AbortSignal) {
+/**
+ * 在所有作品卡片上加上隱藏按鈕與觀看狀態。
+ * 只有單集 ID、沒有作品 ID 的卡片（動畫瘋週期表）會再透過背景查詢。
+ */
+export async function startCards(signal: AbortSignal, source: Source, findCards: (root: ParentNode) => CardInfo[]) {
+  const hiddenItem = hiddenItems[source];
   const cards = new Map<HTMLElement, Card>();
   const statuses = new Map<string, CardStatus | null>();
   const pageSnMap: SnMap = {};
-  let hidden = new Set(await hiddenSnsItem.getValue());
+  let hidden = new Set(await hiddenItem.getValue());
   let mode: HideMode = await hideModeItem.getValue();
   let showHidden = await showHiddenItem.getValue();
 
@@ -30,12 +36,12 @@ export async function startCards(signal: AbortSignal) {
     if (value) next.add(card.animeSn);
     else next.delete(card.animeSn);
     // 先更新本機清單讓畫面立即反應；server 端由佇列處理
-    void hiddenSnsItem.setValue([...next]);
+    void hiddenItem.setValue([...next]);
     void mutate(
       'POST',
-      '/bahamut/hide',
+      `/${source}/hide`,
       { animeSn: card.animeSn, hidden: value, title: card.title || undefined, coverUrl: card.coverUrl, at: new Date().toISOString() },
-      `hide:${card.animeSn}`,
+      `hide:${source}:${card.animeSn}`,
     );
   }
 
@@ -47,7 +53,7 @@ export async function startCards(signal: AbortSignal) {
 
     const btn = card.controls.querySelector('button')!;
     btn.textContent = isHidden ? '還原' : '隱藏';
-    btn.title = isHidden ? '取消隱藏這部動畫' : '隱藏這部動畫';
+    btn.title = isHidden ? '取消隱藏這部作品' : '隱藏這部作品';
 
     const wantPlaceholder = collapse && mode === 'collapse';
     if (wantPlaceholder && !card.placeholder) {
@@ -107,7 +113,7 @@ export async function startCards(signal: AbortSignal) {
     const unknown = [...new Set(sns)].filter((s) => !statuses.has(s));
     if (!unknown.length) return;
     for (const s of unknown) statuses.set(s, null);
-    const res = await query<Record<string, CardStatus>>('POST', '/bahamut/status', { animeSns: unknown });
+    const res = await query<Record<string, CardStatus>>('POST', `/${source}/status`, { animeSns: unknown });
     if (!res.ok) {
       for (const s of unknown) statuses.delete(s);
       return;
@@ -155,7 +161,7 @@ export async function startCards(signal: AbortSignal) {
 
   const rerender = () => cards.forEach(render);
   const unwatch = [
-    hiddenSnsItem.watch((v) => {
+    hiddenItem.watch((v) => {
       hidden = new Set(v);
       rerender();
     }),

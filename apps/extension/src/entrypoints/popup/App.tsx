@@ -6,11 +6,31 @@ import {
   autoSyncItem,
   hideModeItem,
   historySyncItem,
+  netflixSyncItem,
   serverUrlItem,
   showHiddenItem,
   type HideMode,
   type HistorySyncState,
 } from '../../lib/storage.ts';
+
+function SyncStatus({ label, state }: { label: string; state: HistorySyncState }) {
+  return (
+    <div>
+      <div>
+        <strong>{label}</strong>
+        <span className="small">
+          {' '}
+          {state.runningSince
+            ? '同步中…'
+            : state.lastRunAt
+              ? `${new Date(state.lastRunAt).toLocaleString()} ${state.ok ? '✓' : '✗'}`
+              : '尚未同步'}
+        </span>
+      </div>
+      {state.message && !state.runningSince && <div className="small">{state.message}</div>}
+    </div>
+  );
+}
 
 export function App() {
   const [health, setHealth] = useState<HealthResult | null>(null);
@@ -19,6 +39,7 @@ export function App() {
   const [url, setUrl] = useState('');
   const [autoSync, setAutoSync] = useState(true);
   const [syncState, setSyncState] = useState<HistorySyncState>({});
+  const [netflixState, setNetflixState] = useState<HistorySyncState>({});
 
   const check = () => void send({ type: 'flush' }).then(setHealth);
 
@@ -29,7 +50,9 @@ export function App() {
     void serverUrlItem.getValue().then(setUrl);
     void autoSyncItem.getValue().then(setAutoSync);
     void historySyncItem.getValue().then(setSyncState);
-    return historySyncItem.watch(setSyncState);
+    void netflixSyncItem.getValue().then(setNetflixState);
+    const unwatch = [historySyncItem.watch(setSyncState), netflixSyncItem.watch(setNetflixState)];
+    return () => unwatch.forEach((u) => u());
   }, []);
 
   function saveUrl() {
@@ -62,18 +85,7 @@ export function App() {
       </button>
 
       <section className="sync">
-        <div>
-          <strong>觀看紀錄同步</strong>
-          <span className="small">
-            {' '}
-            {syncState.runningSince
-              ? '同步中…'
-              : syncState.lastRunAt
-                ? `${new Date(syncState.lastRunAt).toLocaleString()} ${syncState.ok ? '✓' : '✗'}`
-                : '尚未同步'}
-          </span>
-        </div>
-        {syncState.message && !syncState.runningSince && <div className="small">{syncState.message}</div>}
+        <SyncStatus label="動畫瘋觀看紀錄同步" state={syncState} />
         <label className="check">
           <input
             type="checkbox"
@@ -87,6 +99,14 @@ export function App() {
         </label>
         <button disabled={!health?.online || !!syncState.runningSince} onClick={() => void send({ type: 'syncHistory', full: true })}>
           立即完整同步
+        </button>
+      </section>
+
+      <section className="sync">
+        <SyncStatus label="Netflix 觀看紀錄同步" state={netflixState} />
+        <div className="small">開啟 Netflix 的「觀影動態」頁時同步</div>
+        <button onClick={() => void browser.tabs.create({ url: 'https://www.netflix.com/viewingactivity' })}>
+          開啟觀影動態
         </button>
       </section>
 

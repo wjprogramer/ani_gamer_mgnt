@@ -7,8 +7,14 @@ export default defineConfig({
   webExt: { disabled: true },
   manifest: {
     name: '動畫瘋管理工具',
-    description: '在動畫瘋上隱藏動畫、撰寫評論，並把觀看紀錄存到本機',
+    description: '在動畫瘋與 Netflix 上隱藏作品、撰寫評論，並把觀看紀錄存到本機',
     permissions: ['storage', 'alarms'],
-    host_permissions: ['https://ani.gamer.com.tw/*', 'https://api.gamer.com.tw/*', 'http://127.0.0.1/*', 'http://localhost/*'],
+    host_permissions: [
+      'https://ani.gamer.com.tw/*',
+      'https://api.gamer.com.tw/*',
+      'https://www.netflix.com/*',
+      'http://127.0.0.1/*',
+      'http://localhost/*',
+    ],
   },
 });
