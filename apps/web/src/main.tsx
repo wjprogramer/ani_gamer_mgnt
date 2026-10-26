@@ -4,6 +4,7 @@ import { HashRouter, NavLink, Route, Routes } from 'react-router';
 import { AnimeDetailPage } from './pages/AnimeDetailPage.tsx';
 import { AnimeListPage } from './pages/AnimeListPage.tsx';
 import { HistoryPage } from './pages/HistoryPage.tsx';
+import { MergePage } from './pages/MergePage.tsx';
 import './style.css';
 
 function App() {
@@ -13,9 +14,10 @@ function App() {
         <strong>動畫瘋管理工具</strong>
         <nav>
           <NavLink to="/" end>
-            動畫
+            作品
           </NavLink>
           <NavLink to="/history">觀看紀錄</NavLink>
+          <NavLink to="/merge">合併</NavLink>
         </nav>
       </header>
       <main>
@@ -23,6 +25,7 @@ function App() {
           <Route path="/" element={<AnimeListPage />} />
           <Route path="/anime/:id" element={<AnimeDetailPage />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/merge" element={<MergePage />} />
         </Routes>
       </main>
     </HashRouter>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import type { AnimeFilter, AnimeSummary } from '@agm/shared';
-import { api, episodeText, formatTime } from '../api.ts';
+import { api, formatTime, progressText, siteLabel } from '../api.ts';
 
 const FILTERS: { value: AnimeFilter; label: string }[] = [
   { value: 'all', label: '全部' },
@@ -42,11 +42,11 @@ export function AnimeListPage() {
             </button>
           ))}
         </div>
-        <input type="search" placeholder="搜尋動畫名稱" value={q} onChange={(e) => update({ q: e.target.value })} />
+        <input type="search" placeholder="搜尋作品名稱" value={q} onChange={(e) => update({ q: e.target.value })} />
       </div>
 
       {error && <p className="error">讀取失敗：{error}</p>}
-      {items?.length === 0 && <p className="muted">沒有資料。在動畫瘋上瀏覽或觀看動畫後，這裡就會出現紀錄。</p>}
+      {items?.length === 0 && <p className="muted">沒有資料。在動畫瘋或 Netflix 上瀏覽或觀看後，這裡就會出現紀錄。</p>}
 
       <ul className="grid">
         {items?.map((a) => (
@@ -54,15 +54,14 @@ export function AnimeListPage() {
             <Link to={`/anime/${a.id}`}>
               <div className="cover">
                 {a.coverUrl ? <img src={a.coverUrl} alt="" loading="lazy" /> : <div className="no-cover">無封面</div>}
-                {a.completed ? (
-                  <span className="badge done">✓ 看完</span>
-                ) : (
-                  a.lastEpisodeLabel && <span className="badge">看到{episodeText(a.lastEpisodeLabel)}</span>
+                {(a.completed || a.lastEpisodeLabel) && (
+                  <span className={a.completed ? 'badge done' : 'badge'}>{progressText(a)}</span>
                 )}
                 {a.hidden && <span className="badge hidden-badge">已隱藏</span>}
               </div>
               <div className="card-body">
                 <div className="card-title">{a.title}</div>
+                <div className="muted small">{a.sites.map(siteLabel).join('・')}</div>
                 <div className="muted small">
                   {a.lastWatchedAt ? `最後觀看 ${formatTime(a.lastWatchedAt)}` : '尚未觀看'}
                   {a.reviewCount > 0 && `・${a.reviewCount} 則評論`}

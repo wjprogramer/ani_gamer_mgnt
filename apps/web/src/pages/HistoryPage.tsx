@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import type { WatchHistoryItem } from '@agm/shared';
-import { api, episodeText, formatDuration } from '../api.ts';
+import { api, episodeText, formatDuration, siteLabel } from '../api.ts';
 
 function dayKey(iso: string) {
   return new Date(iso).toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' });
@@ -52,7 +52,7 @@ export function HistoryPage() {
                 <div className="grow">
                   <Link to={`/anime/${w.animeId}`}>{w.animeTitle}</Link>
                   <div className="muted small">
-                    {episodeText(w.episodeLabel)}・{formatDuration(w.progressSec)}
+                    {siteLabel(w.site)}・{episodeText(w.episodeLabel)}・{formatDuration(w.progressSec)}
                     {w.durationSec > 0 && ` / ${formatDuration(w.durationSec)}`}
                     {w.completed && '・✓ 看完'}
                   </div>

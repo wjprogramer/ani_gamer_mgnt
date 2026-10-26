@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { ulid, type AnimeDetail, type Review } from '@agm/shared';
-import { api, episodeText, formatDuration, formatTime } from '../api.ts';
+import { ulid, type AnimeDetail, type AnimeSummary, type Review } from '@agm/shared';
+import { api, episodeText, formatDuration, formatTime, progressText, siteLabel } from '../api.ts';
 
 interface Draft {
   id: string | null;
@@ -13,6 +13,44 @@ interface Draft {
 
 const emptyDraft = (): Draft => ({ id: null, content: '', rating: null, spoiler: false });
 const canSave = (d: Draft) => d.content.trim() !== '' || d.rating !== null;
+
+/** 搜尋其他作品併入目前這部（合併頁沒列出時使用） */
+function MergeSearch({ anime, onMerged }: { anime: AnimeDetail; onMerged: () => void }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<AnimeSummary[]>([]);
+
+  useEffect(() => {
+    if (!q.trim()) return setResults([]);
+    const timer = setTimeout(() => {
+      void api.listAnime('all', q.trim()).then((list) => setResults(list.filter((a) => a.id !== anime.id).slice(0, 10)));
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [q, anime.id]);
+
+  async function merge(other: AnimeSummary) {
+    if (!window.confirm(`把「${other.title}」併入「${anime.title}」？
+觀看紀錄與評論會移到這部作品，此操作無法復原。`)) return;
+    await api.merge(anime.id, other.id);
+    setQ('');
+    onMerged();
+  }
+
+  return (
+    <div className="merge-search">
+      <input type="search" placeholder="搜尋要併入這部的作品" value={q} onChange={(e) => setQ(e.target.value)} />
+      <ul>
+        {results.map((a) => (
+          <li key={a.id}>
+            <span className="grow">
+              {a.title} <span className="muted small">{a.sites.map(siteLabel).join('・')}</span>
+            </span>
+            <button onClick={() => void merge(a)}>併入這部</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function AnimeDetailPage() {
   const { id = '' } = useParams();
@@ -81,7 +119,7 @@ export function AnimeDetailPage() {
             </dd>
             {anime.sources.map((s) => (
               <div key={s.source + s.externalId}>
-                <dt>{s.source === 'bahamut' ? '動畫瘋 sn' : s.source}</dt>
+                <dt>{siteLabel(s.source)} ID</dt>
                 <dd>
                   {s.url ? (
                     <a href={s.url} target="_blank" rel="noreferrer">
@@ -95,7 +133,7 @@ export function AnimeDetailPage() {
             ))}
             <dt>進度</dt>
             <dd>
-              {anime.completed ? '✓ 看完' : (episodeText(anime.lastEpisodeLabel) ?? '尚未觀看')}
+              {progressText(anime)}
             </dd>
             <dt>建檔時間</dt>
             <dd>{formatTime(anime.createdAt)}</dd>
@@ -163,6 +201,12 @@ export function AnimeDetailPage() {
       </section>
 
       <section>
+        <h2>合併其他作品</h2>
+        {anime.altTitles.length > 0 && <p className="muted small">其他名稱：{anime.altTitles.join('、')}</p>}
+        <MergeSearch anime={anime} onMerged={() => void load()} />
+      </section>
+
+      <section>
         <h2>觀看紀錄</h2>
         {watchedEpisodes.length === 0 && <p className="muted">還沒有觀看紀錄。</p>}
         <table>
@@ -170,6 +214,7 @@ export function AnimeDetailPage() {
             {watchedEpisodes.flatMap((e) =>
               e.watches.map((w) => (
                 <tr key={w.id}>
+                  {anime.sites.length > 1 && <td>{siteLabel(e.source)}</td>}
                   <td>{episodeText(e.label)}</td>
                   <td>{formatTime(w.startedAt)}</td>
                   <td>

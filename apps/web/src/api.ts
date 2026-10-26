@@ -1,11 +1,15 @@
-import type {
-  AnimeDetail,
-  AnimeFilter,
-  AnimePatch,
-  AnimeSummary,
-  Review,
-  ReviewPut,
-  WatchHistoryItem,
+import {
+  MOVIE_LABEL,
+  SOURCE_LABELS,
+  type AnimeDetail,
+  type AnimeFilter,
+  type AnimePatch,
+  type AnimeSummary,
+  type MergeCandidate,
+  type Review,
+  type ReviewPut,
+  type Source,
+  type WatchHistoryItem,
 } from '@agm/shared';
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -31,7 +35,19 @@ export const api = {
   deleteWatch: (id: string) => request<null>('DELETE', `/watch/${id}`),
   putReview: (id: string, review: ReviewPut) => request<Review>('PUT', `/reviews/${id}`, review),
   deleteReview: (id: string) => request<null>('DELETE', `/reviews/${id}`),
+  mergeCandidates: () => request<MergeCandidate[]>('GET', '/merge/candidates'),
+  merge: (targetId: string, sourceId: string) => request<AnimeDetail>('POST', '/merge', { targetId, sourceId }),
+  dismissMerge: (aId: string, bId: string) => request<null>('POST', '/merge/dismiss', { aId, bId }),
 };
+
+export const siteLabel = (s: string) => SOURCE_LABELS[s as Source] ?? s;
+
+/** 列表與合併頁顯示的進度；電影沒有集數 */
+export function progressText(a: Pick<AnimeSummary, 'completed' | 'lastEpisodeLabel'>) {
+  if (a.completed) return '✓ 看完';
+  if (!a.lastEpisodeLabel) return '尚未觀看';
+  return a.lastEpisodeLabel === MOVIE_LABEL ? '看過' : `看到${episodeText(a.lastEpisodeLabel)}`;
+}
 
 export function formatTime(iso: string | null) {
   return iso ? new Date(iso).toLocaleString('zh-TW', { hour12: false }) : '—';
