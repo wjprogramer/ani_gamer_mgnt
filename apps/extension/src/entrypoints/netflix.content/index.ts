@@ -61,6 +61,8 @@ async function initWatchPage(videoId: string, signal: AbortSignal) {
     'netflix',
     { animeSn: title.anime.animeSn, title: title.anime.title, videoSn: videoId, episodeLabel: title.labels.get(videoId) },
     signal,
+    // 自動播下一集時網址會先換，換了之後這一集的紀錄就不再更新
+    () => watchVideoId(location.href) === videoId,
   );
 }
 
