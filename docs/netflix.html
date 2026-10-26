@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Netflix 支援調查</title>
+<style>
+  :root { --bg: #fdfdfc; --fg: #1f2328; --muted: #59636e; --line: #d8dee4; --card: #f6f8fa; --accent: #0969da; --warn: #9a6700; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #30363d; --card: #161b22; --accent: #4493f8; --warn: #d29922; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.7 system-ui, "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; }
+  h2 { font-size: 1.35rem; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .meta { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: .95rem; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  .table-wrap { overflow-x: auto; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; background: var(--card); padding: 1px 5px; border-radius: 4px; }
+  .callout { border-left: 4px solid var(--accent); background: var(--card); padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 16px 0; }
+  .todo { color: var(--warn); }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>Netflix 支援調查</h1>
+<p class="meta">調查日期：2026-10-26・方式：在登入狀態下檢查頁面 DOM 與網路請求（未播放影片，以免新增觀看紀錄）。網站改版後需重新驗證。</p>
+
+<div class="callout">
+  <strong>結論：可行，但觀看紀錄比動畫瘋粗。</strong>Netflix 的觀影動態<strong>只有日期、沒有時間與進度</strong>，所以同步回來的紀錄只能精確到「哪一天看了哪一集」。在這台電腦上播放時，仍可像動畫瘋一樣精確記錄時間與進度。資料表原本就以 <code>source + external_id</code> 設計，不需要改結構。
+</div>
+
+<section>
+<h2>1. ID</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>ID</th><th>意義</th><th>出現位置</th></tr></thead>
+  <tbody>
+    <tr><td>作品 ID</td><td>影集或電影，對應 <code>anime_source.external_id</code></td><td>卡片連結 <code>/browse?jbv=&lt;id&gt;</code>、<code>/title/&lt;id&gt;</code></td></tr>
+    <tr><td>影片 ID</td><td>單集（電影則與作品相同），對應 <code>episode.external_id</code></td><td>觀影動態的 <code>/title/&lt;id&gt;</code>、播放頁 <code>/watch/&lt;id&gt;</code></td></tr>
+  </tbody>
+</table>
+</div>
+<p>觀影動態只給單集的影片 ID，不給作品 ID；要知道屬於哪部作品，需另外查詢（見第 5 節）。</p>
+</section>
+
+<section>
+<h2>2. 卡片（首頁、類別頁）</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>資料</th><th>來源</th></tr></thead>
+  <tbody>
+    <tr><td>卡片</td><td><code>a[data-uia="standard-card"]</code>、排行榜 <code>a[data-uia="ranked-card"]</code></td></tr>
+    <tr><td>作品 ID</td><td>連結的 <code>jbv</code> 參數</td></tr>
+    <tr><td>名稱</td><td>連結的 <code>aria-label</code></td></tr>
+    <tr><td>圖片</td><td>卡片內 <code>img</code>，網址在 <code>*.nflxso.net</code></td></tr>
+  </tbody>
+</table>
+</div>
+<p>class 名稱是編譯產生的雜湊值（例如 <code>default-ltr-…-cache-16qxjbe</code>），不能當選擇器；<code>data-uia</code> 比較穩定。列表是虛擬捲動，捲動時會重建節點，要用 <code>MutationObserver</code> 持續處理。</p>
+</section>
+
+<section>
+<h2>3. 觀影動態 <code>/viewingactivity</code></h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>資料</th><th>來源</th></tr></thead>
+  <tbody>
+    <tr><td>每一列</td><td><code>li.retableRow[data-uia="activity-row"]</code>，由新到舊</td></tr>
+    <tr><td>日期</td><td><code>.col.date</code>，格式為「YY/M/D」，<strong>沒有時間</strong>（格式可能隨帳號語系不同）</td></tr>
+    <tr><td>名稱與影片 ID</td><td><code>.col.title a</code>：連結 <code>/title/&lt;影片 ID&gt;</code>；文字為「作品：第 N 季：集名」，電影只有名稱</td></tr>
+    <tr><td>更多紀錄</td><td>「顯示更多」按鈕，每次多載入 50 筆</td></tr>
+    <tr><td>API</td><td><code>POST /api/aui/pathEvaluator/web/^2.0.0?method=call&amp;callPath=["aui","viewingActivity",頁,筆數]</code>（falcor）。需要帶頁面上的授權參數</td></tr>
+    <tr><td>其他</td><td>有「全部下載」可匯出 CSV（同樣只有名稱與日期）；每個設定檔的紀錄分開</td></tr>
+  </tbody>
+</table>
+</div>
+<p>觀察到的 70 筆中，同一集沒有重複出現，推測與動畫瘋一樣<strong>每集只留最近一次的日期</strong>，重看會覆蓋。<span class="todo">待驗證：重看已看過的一集後，舊的那筆是否消失。</span></p>
+</section>
+
+<section>
+<h2>4. 播放頁 <code>/watch/&lt;影片 ID&gt;</code></h2>
+<p class="todo">未實地確認（避免新增觀看紀錄）。實作前需要使用者播放一集後再調查：</p>
+<ul>
+  <li>影片 ID 在網址上；換集時網址會變，但不一定重新載入頁面（同動畫瘋的處理方式）。</li>
+  <li>頁面上有 <code>&lt;video&gt;</code>，可沿用現有的 <code>trackWatch</code>（播放、暫停、進度回報）。</li>
+  <li>作品 ID、名稱、集數需要從播放器的標題區或頁面資料取得，選擇器待確認。</li>
+</ul>
+</section>
+
+<section>
+<h2>5. 與現有架構的差異</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>項目</th><th>動畫瘋</th><th>Netflix</th></tr></thead>
+  <tbody>
+    <tr><td>同步的時間精確度</td><td>秒</td><td>日期</td></tr>
+    <tr><td>同步的進度</td><td>最近一集有</td><td>沒有</td></tr>
+    <tr><td>觀看紀錄 → 作品</td><td>直接帶 animeSn</td><td>只有影片 ID，要另外查作品 ID；或先用名稱「作品：…」分組</td></tr>
+    <tr><td>同步方式</td><td>公開的 JSON API</td><td>falcor API 需授權參數；較簡單的做法是在觀影動態頁讀 DOM</td></tr>
+    <tr><td>重複判斷</td><td>同一集＋時間相近</td><td>同一集＋同一天（以本機時區）；同一天重看無法分辨</td></tr>
+    <tr><td>封面</td><td>固定網址</td><td>CDN 網址可能會失效，要在取得時就下載</td></tr>
+    <tr><td>範圍</td><td>都是動畫</td><td>有各種影片，需決定只處理動畫還是全部</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<section>
+<h2>6. 待決定</h2>
+<ol>
+  <li>只管理 Netflix 上的動畫，還是所有影集與電影？</li>
+  <li>同一部作品同時在動畫瘋與 Netflix 上時，是否合併成同一個本機 ID？（建議在管理頁手動合併，不自動比對名稱）</li>
+  <li>Netflix 的觀看紀錄同步也要自動嗎？（建議先做「開啟觀影動態頁時同步」，背景同步要先確認 API 的授權方式）</li>
+</ol>
+</section>
+</main>
+</body>
+</html>
