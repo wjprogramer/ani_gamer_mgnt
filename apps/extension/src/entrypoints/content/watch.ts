@@ -39,17 +39,21 @@ export function trackWatch(source: Source, info: WatchTarget, signal: AbortSigna
   function attach(video: HTMLVideoElement) {
     if (attached.has(video)) return;
     attached.add(video);
-    video.addEventListener('playing', () => {
+    const onPlaying = () => {
       current = video;
       if (!watchId) {
         watchId = ulid();
         startedAt = new Date().toISOString();
+        console.info(`[動畫瘋管理工具] 開始記錄觀看：${info.title} ${info.episodeLabel ?? ''}`);
       }
       report();
-    }, { signal });
+    };
+    video.addEventListener('playing', onPlaying, { signal });
     for (const type of ['pause', 'ended', 'seeked'] as const) {
       video.addEventListener(type, () => current === video && report(), { signal });
     }
+    // Netflix 進入播放頁就自動播放，查完作品資料才開始追蹤時已經錯過 playing 事件
+    if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) onPlaying();
   }
 
   // 播放器的 <video> 由頁面 JS 動態建立
