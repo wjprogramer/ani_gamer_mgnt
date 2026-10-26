@@ -14,6 +14,7 @@ import {
   type CardStatus,
   type Episode,
   type ImportResult,
+  type MarkCompleted,
   type MergeCandidate,
   type Review,
   type ReviewPut,
@@ -32,6 +33,8 @@ interface AnimeRow {
   hidden: number;
   hidden_at: string | null;
   hidden_reason: string | null;
+  manual_completed: number | null;
+  manual_completed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -45,7 +48,7 @@ interface WatchRow {
   progress_sec: number;
   duration_sec: number;
   completed: number;
-  source: 'auto' | 'import';
+  source: 'auto' | 'import' | 'manual';
 }
 
 interface ReviewRow {
@@ -204,6 +207,21 @@ export class Store {
     });
   }
 
+  /** 手動標記看完／沒看完；null 改回自動判斷 */
+  private setManualCompleted(animeId: string, completed: boolean | null, at: string) {
+    this.db
+      .prepare('UPDATE anime SET manual_completed = ?, manual_completed_at = ?, updated_at = ? WHERE id = ?')
+      .run(completed === null ? null : completed ? 1 : 0, completed === null ? null : at, now(), animeId);
+  }
+
+  markCompleted(source: Source, input: MarkCompleted): { id: string; coverUrl: string | null } {
+    return transaction(this.db, () => {
+      const id = this.ensureAnime(source, { animeSn: input.animeSn });
+      this.setManualCompleted(id, input.completed, input.at);
+      return { id, coverUrl: this.pendingCoverUrl(id) };
+    });
+  }
+
   hiddenIds(source: Source): string[] {
     const rows = this.db
       .prepare(
@@ -220,13 +238,14 @@ export class Store {
       const id = this.findAnimeId(source, sn);
       if (!id) continue;
       const anime = this.animeRow(id)!;
-      result[sn] = { animeId: id, hidden: !!anime.hidden, ...this.progress(id) };
+      result[sn] = { animeId: id, hidden: !!anime.hidden, ...this.progress(anime) };
     }
     return result;
   }
 
-  /** 看到的最後一集，以及是否已看完目前已知的最新一集 */
-  private progress(animeId: string): { lastEpisodeLabel: string | null; completed: boolean } {
+  /** 看到的最後一集，以及是否已看完：有手動標記時以手動為準，否則看目前已知的最新一集有沒有看完 */
+  private progress(row: AnimeRow): Pick<CardStatus, 'lastEpisodeLabel' | 'completed' | 'manualCompleted' | 'manualCompletedAt'> {
+    const animeId = row.id;
     const last = this.db
       .prepare(
         `SELECT e.label FROM watch_event w JOIN episode e ON e.id = w.episode_id
@@ -239,7 +258,13 @@ export class Store {
          FROM episode e WHERE e.anime_id = ? ORDER BY e.sort_order DESC LIMIT 1`,
       )
       .get(animeId) as { done: number } | undefined;
-    return { lastEpisodeLabel: last?.label ?? null, completed: !!latest?.done };
+    const manual = row.manual_completed === null ? null : !!row.manual_completed;
+    return {
+      lastEpisodeLabel: last?.label ?? null,
+      completed: manual ?? !!latest?.done,
+      manualCompleted: manual,
+      manualCompletedAt: row.manual_completed_at,
+    };
   }
 
   private animeRow(id: string): AnimeRow | undefined {
@@ -266,20 +291,28 @@ export class Store {
       lastWatchedAt: stats.last_watched_at,
       reviewCount: stats.review_count,
       createdAt: row.created_at,
-      ...this.progress(row.id),
+      ...this.progress(row),
     };
   }
 
-  listAnime(filter: AnimeFilter = 'all', q = ''): AnimeSummary[] {
+  listAnime(filter: AnimeFilter = 'all', q = '', site?: Source): AnimeSummary[] {
     const where: string[] = [];
+    const params: string[] = [];
+    if (site) {
+      where.push('EXISTS (SELECT 1 FROM anime_source s WHERE s.anime_id = a.id AND s.source = ?)');
+      params.push(site);
+    }
     if (filter === 'hidden') where.push('a.hidden = 1');
     if (filter === 'watched') where.push('EXISTS (SELECT 1 FROM watch_event w WHERE w.anime_id = a.id)');
     if (filter === 'reviewed') where.push('EXISTS (SELECT 1 FROM review r WHERE r.anime_id = a.id)');
-    if (q) where.push("(a.title LIKE ? ESCAPE '\\' OR a.alt_titles LIKE ? ESCAPE '\\')");
-    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    if (q) {
+      where.push("(a.title LIKE ? ESCAPE '\\' OR a.alt_titles LIKE ? ESCAPE '\\')");
+      const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      params.push(like, like);
+    }
     const rows = this.db
       .prepare(`SELECT a.* FROM anime a ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY a.updated_at DESC`)
-      .all(...(q ? [like, like] : [])) as unknown as AnimeRow[];
+      .all(...params) as unknown as AnimeRow[];
     return rows
       .map((r) => this.summary(r))
       .sort((a, b) => (b.lastWatchedAt ?? b.createdAt).localeCompare(a.lastWatchedAt ?? a.createdAt));
@@ -337,6 +370,7 @@ export class Store {
       this.db
         .prepare('UPDATE anime SET hidden = ?, hidden_at = ? WHERE id = ?')
         .run(patch.hidden ? 1 : 0, patch.hidden ? t : null, id);
+    if (patch.manualCompleted !== undefined) this.setManualCompleted(id, patch.manualCompleted, t);
     if (patch.hiddenReason !== undefined)
       this.db.prepare('UPDATE anime SET hidden_reason = ? WHERE id = ?').run(patch.hiddenReason, id);
     this.db.prepare('UPDATE anime SET updated_at = ? WHERE id = ?').run(t, id);
@@ -469,15 +503,24 @@ export class Store {
     });
   }
 
+  /** 觀看紀錄與「手動標記看完」依時間由新到舊；手動標記的 id 為 mark:<作品 id> */
   watchHistory(limit = 50, before?: string): WatchHistoryItem[] {
     const rows = this.db
       .prepare(
-        `SELECT w.*, a.title AS anime_title, a.cover_path, e.label AS episode_label, e.source AS site
-         FROM watch_event w JOIN anime a ON a.id = w.anime_id JOIN episode e ON e.id = w.episode_id
-         WHERE (? IS NULL OR w.started_at < ?)
-         ORDER BY w.started_at DESC LIMIT ?`,
+        `SELECT * FROM (
+           SELECT 'watch' AS kind, w.*, a.title AS anime_title, a.cover_path, e.label AS episode_label, e.source AS site
+           FROM watch_event w JOIN anime a ON a.id = w.anime_id JOIN episode e ON e.id = w.episode_id
+           UNION ALL
+           SELECT 'mark', 'mark:' || a.id, '', a.id, a.manual_completed_at, a.manual_completed_at, 0, 0, 1, 'manual',
+                  a.title, a.cover_path, '',
+                  (SELECT source FROM anime_source WHERE anime_id = a.id ORDER BY first_seen_at LIMIT 1)
+           FROM anime a WHERE a.manual_completed = 1
+         )
+         WHERE (? IS NULL OR started_at < ?)
+         ORDER BY started_at DESC LIMIT ?`,
       )
       .all(before ?? null, before ?? null, limit) as unknown as (WatchRow & {
+      kind: 'watch' | 'mark';
       anime_title: string;
       cover_path: string | null;
       episode_label: string;
@@ -485,6 +528,7 @@ export class Store {
     })[];
     return rows.map((r) => ({
       ...toWatch(r),
+      kind: r.kind,
       animeTitle: r.anime_title,
       episodeLabel: r.episode_label,
       site: r.site,
@@ -592,9 +636,21 @@ export class Store {
       this.db
         .prepare(
           `UPDATE anime SET alt_titles = ?, cover_path = COALESCE(cover_path, ?), hidden = MAX(hidden, ?),
-             hidden_at = COALESCE(hidden_at, ?), created_at = MIN(created_at, ?), updated_at = ? WHERE id = ?`,
+             hidden_at = COALESCE(hidden_at, ?), created_at = MIN(created_at, ?), updated_at = ?,
+             manual_completed_at = CASE WHEN manual_completed IS NULL THEN ? ELSE manual_completed_at END,
+             manual_completed = COALESCE(manual_completed, ?) WHERE id = ?`,
         )
-        .run(JSON.stringify(unique), from.cover_path, from.hidden, from.hidden_at, from.created_at, now(), targetId);
+        .run(
+          JSON.stringify(unique),
+          from.cover_path,
+          from.hidden,
+          from.hidden_at,
+          from.created_at,
+          now(),
+          from.manual_completed_at,
+          from.manual_completed,
+          targetId,
+        );
       this.db.prepare('DELETE FROM anime WHERE id = ?').run(sourceId);
     });
     return this.getAnime(targetId);

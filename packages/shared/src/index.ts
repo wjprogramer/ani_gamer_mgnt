@@ -122,8 +122,16 @@ export type MergeRequest = z.infer<typeof mergeSchema>;
 export const mergeDismissSchema = z.object({ aId: z.string().min(1), bId: z.string().min(1) });
 export type MergeDismiss = z.infer<typeof mergeDismissSchema>;
 
+/** 手動標記看完（true）、沒看完（false），null 表示改回自動判斷 */
+const manualCompleted = z.boolean().nullable();
+
+/** 在來源網站上標記（extension 使用，server 離線時會暫存） */
+export const markCompletedSchema = z.object({ animeSn: sn, completed: manualCompleted, at: isoTime });
+export type MarkCompleted = z.infer<typeof markCompletedSchema>;
+
 export const animePatchSchema = z.object({
   hidden: z.boolean().optional(),
+  manualCompleted: manualCompleted.optional(),
   hiddenReason: z.string().nullable().optional(),
   title: z.string().min(1).optional(),
 });
@@ -142,7 +150,11 @@ export interface CardStatus {
   animeId: string;
   hidden: boolean;
   lastEpisodeLabel: string | null;
+  /** 有手動標記時以手動為準 */
   completed: boolean;
+  /** 手動標記；null 表示自動判斷 */
+  manualCompleted: boolean | null;
+  manualCompletedAt: string | null;
 }
 
 export interface Review {
@@ -173,7 +185,7 @@ export interface WatchEvent {
   progressSec: number;
   durationSec: number;
   completed: boolean;
-  source: 'auto' | 'import';
+  source: 'auto' | 'import' | 'manual';
 }
 
 export interface Episode {
@@ -196,7 +208,10 @@ export interface AnimeSummary {
   hiddenAt: string | null;
   lastWatchedAt: string | null;
   lastEpisodeLabel: string | null;
+  /** 有手動標記時以手動為準 */
   completed: boolean;
+  manualCompleted: boolean | null;
+  manualCompletedAt: string | null;
   reviewCount: number;
   createdAt: string;
 }
@@ -211,6 +226,8 @@ export interface AnimeDetail extends AnimeSummary {
 }
 
 export interface WatchHistoryItem extends WatchEvent {
+  /** mark：手動標記看完（沒有集數與進度） */
+  kind: 'watch' | 'mark';
   animeTitle: string;
   /** 在哪個網站看的 */
   site: Source;

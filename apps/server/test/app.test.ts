@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { AnimeDetail, AnimeSummary, CardStatus, MergeCandidate, WatchEvent } from '@agm/shared';
+import type { AnimeDetail, AnimeSummary, CardStatus, MergeCandidate, WatchEvent, WatchHistoryItem } from '@agm/shared';
 import { createApp } from '../src/app.ts';
 import { openDb } from '../src/db.ts';
 import { normalizeTitle, Store, titleSimilarity } from '../src/store.ts';
@@ -388,5 +388,50 @@ describe('titleSimilarity', () => {
   });
   it('忽略全形與標點', () => {
     expect(normalizeTitle('ＳＰＹ×ＦＡＭＩＬＹ')).toBe(normalizeTitle('SPY FAMILY'));
+  });
+});
+
+describe('手動標記看完', () => {
+  it('在來源網站標記看完；觀看紀錄多一列標記時間', async () => {
+    await call('POST', '/api/bahamut/anime', anime);
+    await call('POST', '/api/bahamut/watch', watch({ startedAt: '2026-10-23T12:00:00.000Z', progressSec: 60 }));
+    const marked = await json<AnimeDetail>(
+      call('POST', '/api/bahamut/completed', { animeSn: '113845', completed: true, at: '2026-10-24T09:00:00.000Z' }),
+    );
+    expect(marked).toMatchObject({ completed: true, manualCompleted: true, manualCompletedAt: '2026-10-24T09:00:00.000Z' });
+
+    const status = await json<Record<string, CardStatus>>(call('POST', '/api/bahamut/status', { animeSns: ['113845'] }));
+    expect(status['113845']!.completed).toBe(true);
+
+    const history = await json<WatchHistoryItem[]>(call('GET', '/api/watch'));
+    expect(history.map((h) => [h.kind, h.startedAt])).toEqual([
+      ['mark', '2026-10-24T09:00:00.000Z'],
+      ['watch', '2026-10-23T12:00:00.000Z'],
+    ]);
+    expect(history[0]).toMatchObject({ id: `mark:${marked.id}`, animeTitle: '殺手旅店', site: 'bahamut', source: 'manual' });
+  });
+
+  it('標記沒看完會蓋過自動判斷；改回 null 恢復自動判斷', async () => {
+    const { id } = await json<AnimeDetail>(call('POST', '/api/bahamut/anime', anime));
+    await call('POST', '/api/bahamut/watch', watch({ progressSec: 1400 }));
+    expect((await json<AnimeDetail>(call('PATCH', `/api/anime/${id}`, { manualCompleted: false }))).completed).toBe(false);
+    expect((await json<WatchHistoryItem[]>(call('GET', '/api/watch'))).map((h) => h.kind)).toEqual(['watch']);
+    const auto = await json<AnimeDetail>(call('PATCH', `/api/anime/${id}`, { manualCompleted: null }));
+    expect(auto).toMatchObject({ completed: true, manualCompleted: null, manualCompletedAt: null });
+  });
+
+  it('尚未建檔的作品也能標記', async () => {
+    const res = await call('POST', '/api/netflix/completed', { animeSn: '81000001', completed: true, at: '2026-10-24T09:00:00.000Z' });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('列表依來源篩選', () => {
+  it('site=netflix 只列出有 Netflix 來源的作品', async () => {
+    await call('POST', '/api/bahamut/anime', { animeSn: '1', title: '動畫瘋的' });
+    await call('POST', '/api/netflix/anime', { animeSn: '2', title: 'Netflix 的' });
+    expect((await json<AnimeSummary[]>(call('GET', '/api/anime?site=netflix'))).map((a) => a.title)).toEqual(['Netflix 的']);
+    expect((await json<AnimeSummary[]>(call('GET', '/api/anime?site=bahamut'))).map((a) => a.title)).toEqual(['動畫瘋的']);
+    expect((await call('GET', '/api/anime?site=youtube')).status).toBe(400);
   });
 });

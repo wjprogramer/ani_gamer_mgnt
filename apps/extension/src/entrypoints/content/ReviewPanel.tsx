@@ -22,6 +22,7 @@ export function ReviewPanel({ info }: { info: VideoPageInfo }) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [hidden, setHidden] = useState(false);
+  const [completed, setCompleted] = useState(false);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [serverUrl, setServerUrl] = useState('');
   const [open, setOpen] = useState(true);
@@ -33,6 +34,7 @@ export function ReviewPanel({ info }: { info: VideoPageInfo }) {
     if (res.ok) {
       setLoad({ state: 'ready', anime: res.data });
       setReviews(res.data.reviews);
+      setCompleted(res.data.completed);
     } else setLoad(res.offline ? { state: 'offline' } : { state: 'ready', anime: null });
   }, [info.animeSn]);
 
@@ -93,6 +95,17 @@ export function ReviewPanel({ info }: { info: VideoPageInfo }) {
     );
   }
 
+  function toggleCompleted() {
+    const next = !completed;
+    setCompleted(next);
+    void mutate(
+      'POST',
+      '/bahamut/completed',
+      { animeSn: info.animeSn, completed: next, at: new Date().toISOString() },
+      `completed:bahamut:${info.animeSn}`,
+    );
+  }
+
   const animeId = load.state === 'ready' ? load.anime?.id : undefined;
 
   return (
@@ -102,6 +115,9 @@ export function ReviewPanel({ info }: { info: VideoPageInfo }) {
           {open ? '▾' : '▸'} 我的評論・{info.title}
         </button>
         <div className="actions">
+          <button onClick={toggleCompleted} title="手動標記，會蓋過自動判斷">
+            {completed ? '取消看完' : '標記看完'}
+          </button>
           <button onClick={toggleHidden}>{hidden ? '取消隱藏' : '隱藏此動畫'}</button>
           {animeId && serverUrl && (
             <a href={`${serverUrl}/#/anime/${animeId}`} target="_blank" rel="noreferrer">

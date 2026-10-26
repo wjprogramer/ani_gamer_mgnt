@@ -80,6 +80,11 @@ const migrations: string[] = [
     PRIMARY KEY (a_id, b_id)
   );
   `,
+  // 手動標記看完：NULL 自動判斷、1 看完、0 沒看完
+  `
+  ALTER TABLE anime ADD COLUMN manual_completed INTEGER;
+  ALTER TABLE anime ADD COLUMN manual_completed_at TEXT;
+  `,
 ];
 
 export function openDb(file: string): DatabaseSync {

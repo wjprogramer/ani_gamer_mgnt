@@ -9,6 +9,8 @@ import {
   bahamutImportSchema,
   bahamutStatusRequestSchema,
   bahamutWatchSchema,
+  isSource,
+  markCompletedSchema,
   mergeDismissSchema,
   mergeSchema,
   reviewPutSchema,
@@ -110,6 +112,12 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
 
   site.get('/hidden', (c) => c.json(store.hiddenIds(c.get('source'))));
 
+  site.post('/completed', async (c) => {
+    const { id, coverUrl } = store.markCompleted(c.get('source'), await body(c, markCompletedSchema));
+    queueCover(id, coverUrl);
+    return c.json(store.getAnime(id));
+  });
+
   // 單集 sn 對應只有動畫瘋週期表需要
   site.post('/sn-map/lookup', async (c) => c.json(store.lookupSnMap((await body(c, snMapLookupSchema)).videoSns)));
 
@@ -137,7 +145,9 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
   api.get('/anime', (c) => {
     const filter = (c.req.query('filter') ?? 'all') as AnimeFilter;
     if (!FILTERS.includes(filter)) throw new HTTPException(400, { message: 'filter 不正確' });
-    return c.json(store.listAnime(filter, c.req.query('q') ?? ''));
+    const site = c.req.query('site') || undefined;
+    if (site !== undefined && !isSource(site)) throw new HTTPException(400, { message: 'site 不正確' });
+    return c.json(store.listAnime(filter, c.req.query('q') ?? '', site as Source | undefined));
   });
 
   api.get('/anime/:id', (c) => c.json(store.getAnime(c.req.param('id'))));
