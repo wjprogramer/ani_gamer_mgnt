@@ -26,8 +26,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  listAnime: (filter: AnimeFilter, q: string) =>
-    request<AnimeSummary[]>('GET', `/anime?${new URLSearchParams({ filter, q })}`),
+  listAnime: (filter: AnimeFilter, q: string, site = '') =>
+    request<AnimeSummary[]>('GET', `/anime?${new URLSearchParams({ filter, q, site })}`),
   getAnime: (id: string) => request<AnimeDetail>('GET', `/anime/${id}`),
   patchAnime: (id: string, patch: AnimePatch) => request<AnimeDetail>('PATCH', `/anime/${id}`, patch),
   watchHistory: (before?: string) =>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import type { AnimeFilter, AnimeSummary } from '@agm/shared';
+import { SOURCES, type AnimeFilter, type AnimeSummary } from '@agm/shared';
 import { api, formatTime, progressText, siteLabel } from '../api.ts';
 
 const FILTERS: { value: AnimeFilter; label: string }[] = [
@@ -14,17 +14,18 @@ export function AnimeListPage() {
   const [params, setParams] = useSearchParams();
   const filter = (params.get('filter') as AnimeFilter) || 'all';
   const q = params.get('q') ?? '';
+  const site = params.get('site') ?? '';
   const [items, setItems] = useState<AnimeSummary[] | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      api.listAnime(filter, q).then(setItems, (e: Error) => setError(e.message));
+      api.listAnime(filter, q, site).then(setItems, (e: Error) => setError(e.message));
     }, 200);
     return () => clearTimeout(timer);
-  }, [filter, q]);
+  }, [filter, q, site]);
 
-  const update = (next: Record<string, string>) => setParams({ filter, q, ...next }, { replace: true });
+  const update = (next: Record<string, string>) => setParams({ filter, q, site, ...next }, { replace: true });
 
   return (
     <>
@@ -42,6 +43,14 @@ export function AnimeListPage() {
             </button>
           ))}
         </div>
+        <select value={site} onChange={(e) => update({ site: e.target.value })} aria-label="來源">
+          <option value="">所有來源</option>
+          {SOURCES.map((s) => (
+            <option key={s} value={s}>
+              {siteLabel(s)}
+            </option>
+          ))}
+        </select>
         <input type="search" placeholder="搜尋作品名稱" value={q} onChange={(e) => update({ q: e.target.value })} />
       </div>
 
