@@ -3,12 +3,16 @@ import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import type { z } from 'zod';
 import {
+  ANIME_FILTERS,
+  ANIME_SORTS,
+  animeGroupsPutSchema,
   animePatchSchema,
   bahamutAnimeUpsertSchema,
   bahamutHideSchema,
   bahamutImportSchema,
   bahamutStatusRequestSchema,
   bahamutWatchSchema,
+  groupNameSchema,
   isSource,
   markCompletedSchema,
   mergeDismissSchema,
@@ -18,6 +22,7 @@ import {
   snMapLookupSchema,
   snMapPutSchema,
   type AnimeFilter,
+  type AnimeSort,
   type Health,
   type ImportResult,
   type Source,
@@ -33,7 +38,6 @@ export interface AppDeps {
   version?: string;
 }
 
-const FILTERS: AnimeFilter[] = ['all', 'hidden', 'watched', 'reviewed'];
 
 async function body<T extends z.ZodType>(c: Context, schema: T): Promise<z.infer<T>> {
   const parsed = schema.safeParse(await c.req.json().catch(() => undefined));
@@ -143,11 +147,20 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
   // ---- 管理 ----
 
   api.get('/anime', (c) => {
-    const filter = (c.req.query('filter') ?? 'all') as AnimeFilter;
-    if (!FILTERS.includes(filter)) throw new HTTPException(400, { message: 'filter 不正確' });
-    const site = c.req.query('site') || undefined;
-    if (site !== undefined && !isSource(site)) throw new HTTPException(400, { message: 'site 不正確' });
-    return c.json(store.listAnime(filter, c.req.query('q') ?? '', site as Source | undefined));
+    const query = (name: string) => c.req.query(name) || undefined;
+    const bad = (name: string) => new HTTPException(400, { message: `${name} 不正確` });
+    const filter = (query('filter') ?? 'all') as AnimeFilter;
+    if (!ANIME_FILTERS.includes(filter)) throw bad('filter');
+    const sort = (query('sort') ?? 'default') as AnimeSort;
+    if (!ANIME_SORTS.includes(sort)) throw bad('sort');
+    const site = query('site');
+    if (site !== undefined && !isSource(site)) throw bad('site');
+    const ratingParam = query('rating');
+    const rating = ratingParam === 'unrated' ? 'unrated' : ratingParam === undefined ? undefined : Number(ratingParam);
+    if (typeof rating === 'number' && !(Number.isInteger(rating) && rating >= 1 && rating <= 5)) throw bad('rating');
+    return c.json(
+      store.listAnime({ filter, sort, q: query('q'), site: site as Source | undefined, groupId: query('group'), rating }),
+    );
   });
 
   api.get('/anime/:id', (c) => c.json(store.getAnime(c.req.param('id'))));
@@ -168,6 +181,23 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
 
   api.delete('/reviews/:id', (c) => {
     store.deleteReview(c.req.param('id'));
+    return c.body(null, 204);
+  });
+
+  api.put('/anime/:id/groups', async (c) =>
+    c.json(store.setAnimeGroups(c.req.param('id'), (await body(c, animeGroupsPutSchema)).groupIds)),
+  );
+
+  api.get('/groups', (c) => c.json(store.listGroups()));
+
+  api.post('/groups', async (c) => c.json(store.createGroup((await body(c, groupNameSchema)).name)));
+
+  api.patch('/groups/:id', async (c) =>
+    c.json(store.renameGroup(c.req.param('id'), (await body(c, groupNameSchema)).name)),
+  );
+
+  api.delete('/groups/:id', (c) => {
+    store.deleteGroup(c.req.param('id'));
     return c.body(null, 204);
   });
 

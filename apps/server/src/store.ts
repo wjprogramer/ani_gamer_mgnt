@@ -4,7 +4,8 @@ import {
   COMPLETED_RATIO,
   ulid,
   type AnimeDetail,
-  type AnimeFilter,
+  type AnimeGroup,
+  type AnimeListQuery,
   type AnimePatch,
   type AnimeSummary,
   type BahamutAnimeUpsert,
@@ -35,6 +36,8 @@ interface AnimeRow {
   hidden_reason: string | null;
   manual_completed: number | null;
   manual_completed_at: string | null;
+  favorite: number;
+  favorited_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -275,9 +278,14 @@ export class Store {
     const stats = this.db
       .prepare(
         `SELECT (SELECT MAX(started_at) FROM watch_event WHERE anime_id = ?) AS last_watched_at,
-                (SELECT COUNT(*) FROM review WHERE anime_id = ?) AS review_count`,
+                (SELECT COUNT(*) FROM review WHERE anime_id = ?) AS review_count,
+                (SELECT rating FROM review WHERE anime_id = ? AND rating IS NOT NULL
+                 ORDER BY updated_at DESC LIMIT 1) AS rating`,
       )
-      .get(row.id, row.id) as { last_watched_at: string | null; review_count: number };
+      .get(row.id, row.id, row.id) as { last_watched_at: string | null; review_count: number; rating: number | null };
+    const groups = this.db
+      .prepare('SELECT group_id FROM anime_group_member WHERE anime_id = ? ORDER BY added_at')
+      .all(row.id) as { group_id: string }[];
     const sources = this.db
       .prepare('SELECT DISTINCT source FROM anime_source WHERE anime_id = ? ORDER BY source')
       .all(row.id) as { source: Source }[];
@@ -290,18 +298,26 @@ export class Store {
       hiddenAt: row.hidden_at,
       lastWatchedAt: stats.last_watched_at,
       reviewCount: stats.review_count,
+      favorite: !!row.favorite,
+      rating: stats.rating,
+      groupIds: groups.map((g) => g.group_id),
       createdAt: row.created_at,
       ...this.progress(row),
     };
   }
 
-  listAnime(filter: AnimeFilter = 'all', q = '', site?: Source): AnimeSummary[] {
+  listAnime({ filter = 'all', q = '', site, groupId, rating, sort = 'default' }: AnimeListQuery = {}): AnimeSummary[] {
     const where: string[] = [];
     const params: string[] = [];
     if (site) {
       where.push('EXISTS (SELECT 1 FROM anime_source s WHERE s.anime_id = a.id AND s.source = ?)');
       params.push(site);
     }
+    if (groupId) {
+      where.push('EXISTS (SELECT 1 FROM anime_group_member m WHERE m.anime_id = a.id AND m.group_id = ?)');
+      params.push(groupId);
+    }
+    if (filter === 'favorite') where.push('a.favorite = 1');
     if (filter === 'hidden') where.push('a.hidden = 1');
     if (filter === 'watched') where.push('EXISTS (SELECT 1 FROM watch_event w WHERE w.anime_id = a.id)');
     if (filter === 'reviewed') where.push('EXISTS (SELECT 1 FROM review r WHERE r.anime_id = a.id)');
@@ -313,9 +329,19 @@ export class Store {
     const rows = this.db
       .prepare(`SELECT a.* FROM anime a ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY a.updated_at DESC`)
       .all(...params) as unknown as AnimeRow[];
+    const byDefault = (a: AnimeSummary, b: AnimeSummary) =>
+      (b.lastWatchedAt ?? b.createdAt).localeCompare(a.lastWatchedAt ?? a.createdAt);
+    const compare: Record<NonNullable<AnimeListQuery['sort']>, (a: AnimeSummary, b: AnimeSummary) => number> = {
+      default: byDefault,
+      title: (a, b) => a.title.localeCompare(b.title, 'zh-Hant'),
+      // 未評分的排最後，同分依預設順序
+      rating: (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || byDefault(a, b),
+      created: (a, b) => b.createdAt.localeCompare(a.createdAt),
+    };
     return rows
       .map((r) => this.summary(r))
-      .sort((a, b) => (b.lastWatchedAt ?? b.createdAt).localeCompare(a.lastWatchedAt ?? a.createdAt));
+      .filter((a) => (rating === undefined ? true : rating === 'unrated' ? a.rating === null : (a.rating ?? 0) >= rating))
+      .sort(compare[sort]);
   }
 
   getAnime(id: string): AnimeDetail {
@@ -371,6 +397,10 @@ export class Store {
         .prepare('UPDATE anime SET hidden = ?, hidden_at = ? WHERE id = ?')
         .run(patch.hidden ? 1 : 0, patch.hidden ? t : null, id);
     if (patch.manualCompleted !== undefined) this.setManualCompleted(id, patch.manualCompleted, t);
+    if (patch.favorite !== undefined)
+      this.db
+        .prepare('UPDATE anime SET favorite = ?, favorited_at = ? WHERE id = ?')
+        .run(patch.favorite ? 1 : 0, patch.favorite ? t : null, id);
     if (patch.hiddenReason !== undefined)
       this.db.prepare('UPDATE anime SET hidden_reason = ? WHERE id = ?').run(patch.hiddenReason, id);
     this.db.prepare('UPDATE anime SET updated_at = ? WHERE id = ?').run(t, id);
@@ -578,6 +608,57 @@ export class Store {
     this.db.prepare('DELETE FROM review WHERE id = ?').run(id);
   }
 
+  // ---- 分群 ----
+
+  listGroups(): AnimeGroup[] {
+    const rows = this.db
+      .prepare(
+        `SELECT g.id, g.name, g.created_at, (SELECT COUNT(*) FROM anime_group_member m WHERE m.group_id = g.id) AS count
+         FROM anime_group g ORDER BY g.created_at`,
+      )
+      .all() as { id: string; name: string; created_at: string; count: number }[];
+    return rows.map((r) => ({ id: r.id, name: r.name, count: r.count, createdAt: r.created_at }));
+  }
+
+  private group(id: string): AnimeGroup {
+    const g = this.listGroups().find((x) => x.id === id);
+    if (!g) throw new NotFoundError('找不到分群');
+    return g;
+  }
+
+  createGroup(name: string): AnimeGroup {
+    const id = ulid();
+    this.db.prepare('INSERT INTO anime_group (id, name, created_at) VALUES (?, ?, ?)').run(id, name, now());
+    return this.group(id);
+  }
+
+  renameGroup(id: string, name: string): AnimeGroup {
+    this.group(id);
+    this.db.prepare('UPDATE anime_group SET name = ? WHERE id = ?').run(name, id);
+    return this.group(id);
+  }
+
+  deleteGroup(id: string) {
+    this.db.prepare('DELETE FROM anime_group WHERE id = ?').run(id);
+  }
+
+  /** 整批設定作品所屬的分群；已在的分群保留原本的加入時間 */
+  setAnimeGroups(animeId: string, groupIds: string[]): AnimeDetail {
+    if (!this.animeRow(animeId)) throw new NotFoundError(`找不到作品 ${animeId}`);
+    const known = new Set(this.listGroups().map((g) => g.id));
+    const wanted = [...new Set(groupIds)];
+    if (wanted.some((g) => !known.has(g))) throw new NotFoundError('找不到分群');
+    transaction(this.db, () => {
+      const placeholders = wanted.map(() => '?').join(',');
+      this.db
+        .prepare(`DELETE FROM anime_group_member WHERE anime_id = ? ${wanted.length ? `AND group_id NOT IN (${placeholders})` : ''}`)
+        .run(animeId, ...wanted);
+      const insert = this.db.prepare('INSERT OR IGNORE INTO anime_group_member (group_id, anime_id, added_at) VALUES (?, ?, ?)');
+      for (const g of wanted) insert.run(g, animeId, now());
+    });
+    return this.getAnime(animeId);
+  }
+
   // ---- 合併 ----
 
   /** 名稱相似、來源不重疊，且沒有被標記為「不是同一部」的組合 */
@@ -630,6 +711,15 @@ export class Store {
     transaction(this.db, () => {
       for (const table of ['anime_source', 'episode', 'watch_event', 'review']) {
         this.db.prepare(`UPDATE ${table} SET anime_id = ? WHERE anime_id = ?`).run(targetId, sourceId);
+      }
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO anime_group_member (group_id, anime_id, added_at)
+           SELECT group_id, ?, added_at FROM anime_group_member WHERE anime_id = ?`,
+        )
+        .run(targetId, sourceId);
+      if (from.favorite && !target.favorite) {
+        this.db.prepare('UPDATE anime SET favorite = 1, favorited_at = ? WHERE id = ?').run(from.favorited_at, targetId);
       }
       const altTitles = [...JSON.parse(target.alt_titles), from.title, ...JSON.parse(from.alt_titles)] as string[];
       const unique = altTitles.filter((t, i) => t !== target.title && altTitles.indexOf(t) === i);

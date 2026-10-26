@@ -85,6 +85,25 @@ const migrations: string[] = [
   ALTER TABLE anime ADD COLUMN manual_completed INTEGER;
   ALTER TABLE anime ADD COLUMN manual_completed_at TEXT;
   `,
+  // 收藏與自訂分群（一部作品可屬於多個分群）
+  `
+  ALTER TABLE anime ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE anime ADD COLUMN favorited_at TEXT;
+
+  CREATE TABLE anime_group (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE anime_group_member (
+    group_id TEXT NOT NULL REFERENCES anime_group(id) ON DELETE CASCADE,
+    anime_id TEXT NOT NULL REFERENCES anime(id) ON DELETE CASCADE,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (group_id, anime_id)
+  );
+  CREATE INDEX anime_group_member_anime ON anime_group_member(anime_id);
+  `,
 ];
 
 export function openDb(file: string): DatabaseSync {

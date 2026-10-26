@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { AnimeDetail, AnimeSummary, CardStatus, MergeCandidate, WatchEvent, WatchHistoryItem } from '@agm/shared';
+import type { AnimeDetail, AnimeGroup, AnimeSummary, CardStatus, MergeCandidate, WatchEvent, WatchHistoryItem } from '@agm/shared';
 import { createApp } from '../src/app.ts';
 import { openDb } from '../src/db.ts';
 import { normalizeTitle, Store, titleSimilarity } from '../src/store.ts';
@@ -433,5 +433,92 @@ describe('列表依來源篩選', () => {
     expect((await json<AnimeSummary[]>(call('GET', '/api/anime?site=netflix'))).map((a) => a.title)).toEqual(['Netflix 的']);
     expect((await json<AnimeSummary[]>(call('GET', '/api/anime?site=bahamut'))).map((a) => a.title)).toEqual(['動畫瘋的']);
     expect((await call('GET', '/api/anime?site=youtube')).status).toBe(400);
+  });
+});
+
+describe('收藏、分群、評分篩選與排序', () => {
+  async function seed() {
+    const make = async (sn: string, title: string, rating?: number) => {
+      const a = await json<AnimeDetail>(call('POST', '/api/bahamut/anime', { animeSn: sn, title }));
+      if (rating !== undefined) {
+        await call('PUT', `/api/reviews/R${sn}`, {
+          animeId: a.id,
+          rating,
+          content: '',
+          createdAt: '2026-10-23T00:00:00.000Z',
+          updatedAt: '2026-10-23T00:00:00.000Z',
+        });
+      }
+      return a.id;
+    };
+    return { a: await make('1', 'B 作品', 3), b: await make('2', 'A 作品', 5), c: await make('3', 'C 作品') };
+  }
+  const titles = async (query: string) => (await json<AnimeSummary[]>(call('GET', `/api/anime?${query}`))).map((x) => x.title);
+
+  it('收藏', async () => {
+    const { a } = await seed();
+    expect((await json<AnimeDetail>(call('PATCH', `/api/anime/${a}`, { favorite: true }))).favorite).toBe(true);
+    expect(await titles('filter=favorite')).toEqual(['B 作品']);
+  });
+
+  it('評分取最新一則有給星的評論', async () => {
+    const { a } = await seed();
+    await call('PUT', '/api/reviews/R1b', {
+      animeId: a,
+      rating: 1,
+      content: '重看後改觀',
+      createdAt: '2026-10-25T00:00:00.000Z',
+      updatedAt: '2026-10-25T00:00:00.000Z',
+    });
+    await call('PUT', '/api/reviews/R1c', {
+      animeId: a,
+      content: '沒給星',
+      createdAt: '2026-10-26T00:00:00.000Z',
+      updatedAt: '2026-10-26T00:00:00.000Z',
+    });
+    expect((await json<AnimeDetail>(call('GET', `/api/anime/${a}`))).rating).toBe(1);
+  });
+
+  it('依評分篩選與排序', async () => {
+    await seed();
+    expect(await titles('rating=4')).toEqual(['A 作品']);
+    expect(await titles('rating=unrated')).toEqual(['C 作品']);
+    expect(await titles('sort=rating')).toEqual(['A 作品', 'B 作品', 'C 作品']);
+    expect(await titles('sort=title')).toEqual(['A 作品', 'B 作品', 'C 作品']);
+    expect((await call('GET', '/api/anime?rating=6')).status).toBe(400);
+    expect((await call('GET', '/api/anime?sort=bad')).status).toBe(400);
+  });
+
+  it('分群：建立、設定、篩選、改名、刪除', async () => {
+    const { a, b } = await seed();
+    const g1 = await json<AnimeGroup>(call('POST', '/api/groups', { name: '追番中' }));
+    const g2 = await json<AnimeGroup>(call('POST', '/api/groups', { name: '神作' }));
+    expect((await json<AnimeDetail>(call('PUT', `/api/anime/${a}/groups`, { groupIds: [g1.id, g2.id] }))).groupIds).toEqual([
+      g1.id,
+      g2.id,
+    ]);
+    await call('PUT', `/api/anime/${b}/groups`, { groupIds: [g2.id] });
+    await call('PUT', `/api/anime/${a}/groups`, { groupIds: [g2.id] });
+
+    expect(await titles(`group=${g2.id}&sort=title`)).toEqual(['A 作品', 'B 作品']);
+    expect(await titles(`group=${g1.id}`)).toEqual([]);
+    expect((await json<AnimeGroup>(call('PATCH', `/api/groups/${g1.id}`, { name: '已棄坑' }))).name).toBe('已棄坑');
+    expect((await json<AnimeGroup[]>(call('GET', '/api/groups'))).map((g) => [g.name, g.count])).toEqual([
+      ['已棄坑', 0],
+      ['神作', 2],
+    ]);
+    await call('DELETE', `/api/groups/${g2.id}`);
+    expect((await json<AnimeDetail>(call('GET', `/api/anime/${a}`))).groupIds).toEqual([]);
+    expect((await call('PUT', `/api/anime/${a}/groups`, { groupIds: ['nope'] })).status).toBe(404);
+    expect((await call('POST', '/api/groups', { name: '  ' })).status).toBe(400);
+  });
+
+  it('合併時保留收藏與分群', async () => {
+    const { a, b } = await seed();
+    const g = await json<AnimeGroup>(call('POST', '/api/groups', { name: '神作' }));
+    await call('PATCH', `/api/anime/${b}`, { favorite: true });
+    await call('PUT', `/api/anime/${b}/groups`, { groupIds: [g.id] });
+    const merged = await json<AnimeDetail>(call('POST', '/api/merge', { targetId: a, sourceId: b }));
+    expect(merged).toMatchObject({ favorite: true, groupIds: [g.id] });
   });
 });

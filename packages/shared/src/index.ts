@@ -129,8 +129,15 @@ const manualCompleted = z.boolean().nullable();
 export const markCompletedSchema = z.object({ animeSn: sn, completed: manualCompleted, at: isoTime });
 export type MarkCompleted = z.infer<typeof markCompletedSchema>;
 
+export const groupNameSchema = z.object({ name: z.string().trim().min(1).max(50) });
+export type GroupName = z.infer<typeof groupNameSchema>;
+
+/** 設定作品所屬的分群（整批取代） */
+export const animeGroupsPutSchema = z.object({ groupIds: z.array(z.string().min(1)).max(100) });
+
 export const animePatchSchema = z.object({
   hidden: z.boolean().optional(),
+  favorite: z.boolean().optional(),
   manualCompleted: manualCompleted.optional(),
   hiddenReason: z.string().nullable().optional(),
   title: z.string().min(1).optional(),
@@ -213,6 +220,10 @@ export interface AnimeSummary {
   manualCompleted: boolean | null;
   manualCompletedAt: string | null;
   reviewCount: number;
+  favorite: boolean;
+  /** 最新一則有給星的評論的評分 */
+  rating: number | null;
+  groupIds: string[];
   createdAt: string;
 }
 
@@ -235,7 +246,29 @@ export interface WatchHistoryItem extends WatchEvent {
   coverUrl: string | null;
 }
 
-export type AnimeFilter = 'all' | 'hidden' | 'watched' | 'reviewed';
+export type AnimeFilter = 'all' | 'hidden' | 'watched' | 'reviewed' | 'favorite';
+export const ANIME_FILTERS: AnimeFilter[] = ['all', 'hidden', 'watched', 'reviewed', 'favorite'];
+
+/** default：最後觀看（沒看過的以建檔時間）由新到舊 */
+export type AnimeSort = 'default' | 'title' | 'rating' | 'created';
+export const ANIME_SORTS: AnimeSort[] = ['default', 'title', 'rating', 'created'];
+
+export interface AnimeListQuery {
+  filter?: AnimeFilter;
+  q?: string;
+  site?: Source;
+  groupId?: string;
+  /** 1–5：N 星以上；unrated：未評分 */
+  rating?: number | 'unrated';
+  sort?: AnimeSort;
+}
+
+export interface AnimeGroup {
+  id: string;
+  name: string;
+  count: number;
+  createdAt: string;
+}
 
 /** 疑似同一部作品 */
 export interface MergeCandidate {
