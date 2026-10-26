@@ -24,10 +24,15 @@ export function HistoryPage() {
 
   useEffect(() => load(), []);
 
-  async function remove(id: string) {
-    if (!window.confirm('確定刪除這筆觀看紀錄？')) return;
-    await api.deleteWatch(id);
-    setItems((prev) => prev.filter((w) => w.id !== id));
+  async function remove(w: WatchHistoryItem) {
+    if (w.kind === 'mark') {
+      if (!window.confirm('取消「手動標記看完」？之後改回自動判斷。')) return;
+      await api.patchAnime(w.animeId, { manualCompleted: null });
+    } else {
+      if (!window.confirm('確定刪除這筆觀看紀錄？')) return;
+      await api.deleteWatch(w.id);
+    }
+    setItems((prev) => prev.filter((x) => x.id !== w.id));
   }
 
   const groups = new Map<string, WatchHistoryItem[]>();
@@ -52,13 +57,19 @@ export function HistoryPage() {
                 <div className="grow">
                   <Link to={`/anime/${w.animeId}`}>{w.animeTitle}</Link>
                   <div className="muted small">
-                    {siteLabel(w.site)}・{episodeText(w.episodeLabel)}・{formatDuration(w.progressSec)}
-                    {w.durationSec > 0 && ` / ${formatDuration(w.durationSec)}`}
-                    {w.completed && '・✓ 看完'}
+                    {w.kind === 'mark' ? (
+                      '✓ 手動標記看完'
+                    ) : (
+                      <>
+                        {siteLabel(w.site)}・{episodeText(w.episodeLabel)}・{formatDuration(w.progressSec)}
+                        {w.durationSec > 0 && ` / ${formatDuration(w.durationSec)}`}
+                        {w.completed && '・✓ 看完'}
+                      </>
+                    )}
                   </div>
                 </div>
-                <button className="link danger" onClick={() => void remove(w.id)}>
-                  刪除
+                <button className="link danger" onClick={() => void remove(w)}>
+                  {w.kind === 'mark' ? '取消標記' : '刪除'}
                 </button>
               </li>
             ))}

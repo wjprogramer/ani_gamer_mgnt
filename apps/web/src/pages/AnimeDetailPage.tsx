@@ -68,6 +68,10 @@ export function AnimeDetailPage() {
     setAnime(await api.patchAnime(id, { hidden: !anime!.hidden }));
   }
 
+  async function setManualCompleted(manualCompleted: boolean | null) {
+    setAnime(await api.patchAnime(id, { manualCompleted }));
+  }
+
   async function saveReview() {
     // 只有評分、沒有留言也可以儲存
     if (!canSave(draft)) return;
@@ -92,7 +96,13 @@ export function AnimeDetailPage() {
 
   const bahamut = anime.sources.find((s) => s.source === 'bahamut');
   const tags = (bahamut?.rawMeta.tags as string[] | undefined) ?? [];
-  const watchedEpisodes = anime.episodes.filter((e) => e.watches.length);
+  // 由新到舊；手動標記看完也列成一筆
+  const rows = [
+    ...anime.episodes.flatMap((e) => e.watches.map((w) => ({ key: w.id, at: w.startedAt, episode: e, watch: w }))),
+    ...(anime.manualCompleted && anime.manualCompletedAt
+      ? [{ key: 'mark', at: anime.manualCompletedAt, episode: undefined, watch: undefined }]
+      : []),
+  ].sort((a, b) => b.at.localeCompare(a.at));
 
   return (
     <article className="detail">
@@ -134,6 +144,20 @@ export function AnimeDetailPage() {
             <dt>進度</dt>
             <dd>
               {progressText(anime)}
+              {anime.manualCompleted !== null && (
+                <span className="muted small"> （手動標記於 {formatTime(anime.manualCompletedAt)}）</span>
+              )}
+              <div className="row small">
+                {anime.manualCompleted !== true && (
+                  <button onClick={() => void setManualCompleted(true)}>標記看完</button>
+                )}
+                {anime.manualCompleted !== false && (
+                  <button onClick={() => void setManualCompleted(false)}>標記沒看完</button>
+                )}
+                {anime.manualCompleted !== null && (
+                  <button onClick={() => void setManualCompleted(null)}>改回自動判斷</button>
+                )}
+              </div>
             </dd>
             <dt>建檔時間</dt>
             <dd>{formatTime(anime.createdAt)}</dd>
@@ -208,22 +232,30 @@ export function AnimeDetailPage() {
 
       <section>
         <h2>觀看紀錄</h2>
-        {watchedEpisodes.length === 0 && <p className="muted">還沒有觀看紀錄。</p>}
+        {rows.length === 0 && <p className="muted">還沒有觀看紀錄。</p>}
         <table>
           <tbody>
-            {watchedEpisodes.flatMap((e) =>
-              e.watches.map((w) => (
-                <tr key={w.id}>
+            {rows.map(({ key, at, episode: e, watch: w }) =>
+              e && w ? (
+                <tr key={key}>
                   {anime.sites.length > 1 && <td>{siteLabel(e.source)}</td>}
                   <td>{episodeText(e.label)}</td>
-                  <td>{formatTime(w.startedAt)}</td>
+                  <td>{formatTime(at)}</td>
                   <td>
                     {formatDuration(w.progressSec)}
                     {w.durationSec > 0 && ` / ${formatDuration(w.durationSec)}`}
                   </td>
                   <td>{w.completed ? '✓ 看完' : ''}</td>
                 </tr>
-              )),
+              ) : (
+                <tr key={key}>
+                  {anime.sites.length > 1 && <td />}
+                  <td>手動標記</td>
+                  <td>{formatTime(at)}</td>
+                  <td />
+                  <td>✓ 看完</td>
+                </tr>
+              ),
             )}
           </tbody>
         </table>
