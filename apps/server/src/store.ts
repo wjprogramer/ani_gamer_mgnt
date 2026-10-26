@@ -14,9 +14,11 @@ import {
   type CardStatus,
   type Episode,
   type ImportResult,
+  type MergeCandidate,
   type Review,
   type ReviewPut,
   type SnMap,
+  type Source,
   type WatchEvent,
   type WatchHistoryItem,
 } from '@agm/shared';
@@ -61,41 +63,45 @@ export class NotFoundError extends Error {}
 
 const now = () => new Date().toISOString();
 /**
- * 匯入時判斷「同一次觀看」的時間範圍（分鐘）：
- * - 與之前匯入的紀錄比對：動畫瘋的時間精確到秒，只容許舊版以頁面匯入時的分鐘誤差。
- *   同一集重看會在動畫瘋被覆蓋成新的時間，這裡要保留成兩筆。
- * - 與本機自動記錄比對：兩邊的開始時間來源不同，放寬範圍。
+ * 匯入時判斷「同一次觀看」：同一集，且觀看時段（開始～最後回報）在容許範圍內重疊。
+ * - 與之前匯入的紀錄比對：只容許少量誤差（舊版以頁面匯入時只到分鐘、Netflix 的開始時間為推算值）。
+ *   同一集重看會在來源網站被覆蓋成新的時間，這裡要保留成兩筆。
+ * - 與本機自動記錄比對：兩邊的時間來源不同，放寬範圍。
  */
 const IMPORT_MATCH_MINUTES = 2;
 const AUTO_MATCH_MINUTES = 30;
+/** 合併頁列出的最低名稱相似度 */
+const CANDIDATE_MIN_SCORE = 0.5;
+const CANDIDATE_LIMIT = 100;
 
 /** 由集數標籤推算排序；播放頁建檔時會以實際順序覆蓋 */
 function labelOrder(label?: string): number | undefined {
   return label && /^\d+$/.test(label) ? Number(label) - 1 : undefined;
 }
-const bahamutAnimeUrl = (animeSn: string) => `https://ani.gamer.com.tw/animeRef.php?sn=${animeSn}`;
+const SOURCE_URLS: Record<Source, (id: string) => string> = {
+  bahamut: (id) => `https://ani.gamer.com.tw/animeRef.php?sn=${id}`,
+  netflix: (id) => `https://www.netflix.com/title/${id}`,
+};
+const placeholderTitle = (source: Source, id: string) => (source === BAHAMUT ? `動畫 ${id}` : `作品 ${id}`);
 
 export class Store {
   constructor(private readonly db: DatabaseSync) {}
 
-  // ---- 動畫 ----
+  // ---- 作品 ----
 
-  findAnimeId(source: string, externalId: string): string | undefined {
+  findAnimeId(source: Source, externalId: string): string | undefined {
     const row = this.db
       .prepare('SELECT anime_id FROM anime_source WHERE source = ? AND external_id = ?')
       .get(source, externalId) as { anime_id: string } | undefined;
     return row?.anime_id;
   }
 
-  /** 找出或建立動畫瘋動畫；有提供的欄位會覆寫既有資料 */
-  private ensureBahamutAnime(input: {
-    animeSn: string;
-    title?: string;
-    coverUrl?: string;
-    acgSn?: string;
-    tags?: string[];
-  }): string {
-    const existing = this.findAnimeId(BAHAMUT, input.animeSn);
+  /** 找出或建立來源的作品；有提供的欄位會覆寫既有資料 */
+  private ensureAnime(
+    source: Source,
+    input: { animeSn: string; title?: string; coverUrl?: string; acgSn?: string; tags?: string[] },
+  ): string {
+    const existing = this.findAnimeId(source, input.animeSn);
     const meta: Record<string, unknown> = {};
     if (input.coverUrl) meta.coverUrl = input.coverUrl;
     if (input.acgSn) meta.acgSn = input.acgSn;
@@ -111,11 +117,11 @@ export class Store {
       if (Object.keys(meta).length) {
         const row = this.db
           .prepare('SELECT raw_meta FROM anime_source WHERE source = ? AND external_id = ?')
-          .get(BAHAMUT, input.animeSn) as { raw_meta: string };
+          .get(source, input.animeSn) as { raw_meta: string };
         const merged = { ...JSON.parse(row.raw_meta), ...meta };
         this.db
           .prepare('UPDATE anime_source SET raw_meta = ? WHERE source = ? AND external_id = ?')
-          .run(JSON.stringify(merged), BAHAMUT, input.animeSn);
+          .run(JSON.stringify(merged), source, input.animeSn);
       }
       return existing;
     }
@@ -123,65 +129,72 @@ export class Store {
     const id = ulid();
     this.db
       .prepare('INSERT INTO anime (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)')
-      .run(id, input.title ?? `動畫 ${input.animeSn}`, t, t);
+      .run(id, input.title ?? placeholderTitle(source, input.animeSn), t, t);
     this.db
       .prepare(
         'INSERT INTO anime_source (anime_id, source, external_id, url, raw_meta, first_seen_at) VALUES (?, ?, ?, ?, ?, ?)',
       )
-      .run(id, BAHAMUT, input.animeSn, bahamutAnimeUrl(input.animeSn), JSON.stringify(meta), t);
+      .run(id, source, input.animeSn, SOURCE_URLS[source](input.animeSn), JSON.stringify(meta), t);
     return id;
   }
 
-  private upsertEpisode(animeId: string, videoSn: string, label?: string, sortOrder?: number): string {
-    const existing = this.db
-      .prepare('SELECT id FROM episode WHERE source = ? AND external_id = ?')
-      .get(BAHAMUT, videoSn) as { id: string } | undefined;
+  private findEpisodeId(source: Source, videoSn: string): string | undefined {
+    const row = this.db.prepare('SELECT id FROM episode WHERE source = ? AND external_id = ?').get(source, videoSn) as
+      | { id: string }
+      | undefined;
+    return row?.id;
+  }
+
+  private upsertEpisode(source: Source, animeId: string, videoSn: string, label?: string, sortOrder?: number): string {
+    const existing = this.findEpisodeId(source, videoSn);
     if (existing) {
-      if (label !== undefined) this.db.prepare('UPDATE episode SET label = ? WHERE id = ?').run(label, existing.id);
-      if (sortOrder !== undefined)
-        this.db.prepare('UPDATE episode SET sort_order = ? WHERE id = ?').run(sortOrder, existing.id);
-      return existing.id;
+      if (label !== undefined) this.db.prepare('UPDATE episode SET label = ? WHERE id = ?').run(label, existing);
+      if (sortOrder !== undefined) this.db.prepare('UPDATE episode SET sort_order = ? WHERE id = ?').run(sortOrder, existing);
+      return existing;
     }
     const id = ulid();
     this.db
       .prepare('INSERT INTO episode (id, anime_id, source, external_id, label, sort_order) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(id, animeId, BAHAMUT, videoSn, label ?? videoSn, sortOrder ?? 0);
+      .run(id, animeId, source, videoSn, label ?? videoSn, sortOrder ?? 0);
     return id;
   }
 
-  /** 回傳動畫 id，以及是否還需要下載封面 */
-  upsertBahamutAnime(input: BahamutAnimeUpsert): { id: string; coverUrl: string | null } {
+  /** 回傳作品 id，以及是否還需要下載封面 */
+  upsertAnime(source: Source, input: BahamutAnimeUpsert): { id: string; coverUrl: string | null } {
     return transaction(this.db, () => {
-      const id = this.ensureBahamutAnime(input);
-      for (const ep of input.episodes ?? []) this.upsertEpisode(id, ep.videoSn, ep.label, ep.sortOrder);
+      const id = this.ensureAnime(source, input);
+      for (const ep of input.episodes ?? []) this.upsertEpisode(source, id, ep.videoSn, ep.label, ep.sortOrder);
       return { id, coverUrl: this.pendingCoverUrl(id) };
     });
   }
 
-  /** 尚未有本機封面時，回傳來源的封面網址 */
+  /** 尚未有本機封面時，回傳最早建檔的來源的封面網址 */
   pendingCoverUrl(animeId: string): string | null {
-    const row = this.db
+    const rows = this.db
       .prepare(
         `SELECT a.cover_path, s.raw_meta FROM anime a
-         JOIN anime_source s ON s.anime_id = a.id AND s.source = ?
-         WHERE a.id = ?`,
+         JOIN anime_source s ON s.anime_id = a.id
+         WHERE a.id = ? ORDER BY s.first_seen_at`,
       )
-      .get(BAHAMUT, animeId) as { cover_path: string | null; raw_meta: string } | undefined;
-    if (!row || row.cover_path) return null;
-    const url = JSON.parse(row.raw_meta).coverUrl;
-    return typeof url === 'string' ? url : null;
+      .all(animeId) as { cover_path: string | null; raw_meta: string }[];
+    if (!rows.length || rows[0]!.cover_path) return null;
+    for (const row of rows) {
+      const url = JSON.parse(row.raw_meta).coverUrl;
+      if (typeof url === 'string') return url;
+    }
+    return null;
   }
 
   setCoverPath(animeId: string, coverPath: string) {
     this.db.prepare('UPDATE anime SET cover_path = ? WHERE id = ?').run(coverPath, animeId);
   }
 
-  setHidden(input: BahamutHide): { id: string; coverUrl: string | null } {
+  setHidden(source: Source, input: BahamutHide): { id: string; coverUrl: string | null } {
     return transaction(this.db, () => {
-      const id = this.ensureBahamutAnime({
+      const id = this.ensureAnime(source, {
         animeSn: input.animeSn,
-        // 卡片上的名稱可能不完整，已存在的動畫不覆寫名稱
-        title: this.findAnimeId(BAHAMUT, input.animeSn) ? undefined : input.title,
+        // 卡片上的名稱可能不完整，已存在的作品不覆寫名稱
+        title: this.findAnimeId(source, input.animeSn) ? undefined : input.title,
         coverUrl: input.coverUrl,
       });
       this.db
@@ -191,20 +204,20 @@ export class Store {
     });
   }
 
-  hiddenBahamutSns(): string[] {
+  hiddenIds(source: Source): string[] {
     const rows = this.db
       .prepare(
         `SELECT s.external_id FROM anime a JOIN anime_source s ON s.anime_id = a.id
          WHERE s.source = ? AND a.hidden = 1`,
       )
-      .all(BAHAMUT) as { external_id: string }[];
+      .all(source) as { external_id: string }[];
     return rows.map((r) => r.external_id);
   }
 
-  cardStatus(animeSns: string[]): Record<string, CardStatus> {
+  cardStatus(source: Source, animeSns: string[]): Record<string, CardStatus> {
     const result: Record<string, CardStatus> = {};
     for (const sn of new Set(animeSns)) {
-      const id = this.findAnimeId(BAHAMUT, sn);
+      const id = this.findAnimeId(source, sn);
       if (!id) continue;
       const anime = this.animeRow(id)!;
       result[sn] = { animeId: id, hidden: !!anime.hidden, ...this.progress(id) };
@@ -240,9 +253,13 @@ export class Store {
                 (SELECT COUNT(*) FROM review WHERE anime_id = ?) AS review_count`,
       )
       .get(row.id, row.id) as { last_watched_at: string | null; review_count: number };
+    const sources = this.db
+      .prepare('SELECT DISTINCT source FROM anime_source WHERE anime_id = ? ORDER BY source')
+      .all(row.id) as { source: Source }[];
     return {
       id: row.id,
       title: row.title,
+      sites: sources.map((s) => s.source),
       coverUrl: row.cover_path ? `/covers/${row.cover_path}` : null,
       hidden: !!row.hidden,
       hiddenAt: row.hidden_at,
@@ -270,7 +287,7 @@ export class Store {
 
   getAnime(id: string): AnimeDetail {
     const row = this.animeRow(id);
-    if (!row) throw new NotFoundError(`找不到動畫 ${id}`);
+    if (!row) throw new NotFoundError(`找不到作品 ${id}`);
     const sources = this.db.prepare('SELECT * FROM anime_source WHERE anime_id = ?').all(id) as unknown as {
       source: string;
       external_id: string;
@@ -279,7 +296,7 @@ export class Store {
       first_seen_at: string;
     }[];
     const episodes = this.db
-      .prepare('SELECT * FROM episode WHERE anime_id = ? ORDER BY sort_order, external_id')
+      .prepare('SELECT * FROM episode WHERE anime_id = ? ORDER BY source, sort_order, external_id')
       .all(id) as unknown as { id: string; anime_id: string; source: string; external_id: string; label: string; sort_order: number }[];
     const watches = (
       this.db.prepare('SELECT * FROM watch_event WHERE anime_id = ? ORDER BY started_at DESC').all(id) as unknown as WatchRow[]
@@ -313,7 +330,7 @@ export class Store {
 
   patchAnime(id: string, patch: AnimePatch): AnimeDetail {
     const row = this.animeRow(id);
-    if (!row) throw new NotFoundError(`找不到動畫 ${id}`);
+    if (!row) throw new NotFoundError(`找不到作品 ${id}`);
     const t = now();
     if (patch.title !== undefined) this.db.prepare('UPDATE anime SET title = ? WHERE id = ?').run(patch.title, id);
     if (patch.hidden !== undefined)
@@ -326,7 +343,7 @@ export class Store {
     return this.getAnime(id);
   }
 
-  // ---- 集數對應 ----
+  // ---- 集數對應（動畫瘋週期表用） ----
 
   lookupSnMap(videoSns: string[]): SnMap {
     const result: SnMap = {};
@@ -357,12 +374,12 @@ export class Store {
   // ---- 觀看紀錄 ----
 
   /** 以 id 冪等寫入；同一個 id 重送時只更新進度 */
-  recordWatch(input: BahamutWatch): { watch: WatchEvent; coverUrl: string | null } {
+  recordWatch(source: Source, input: BahamutWatch): { watch: WatchEvent; coverUrl: string | null } {
     return transaction(this.db, () => {
-      const animeId = this.ensureBahamutAnime({ animeSn: input.animeSn, title: undefined });
-      if (this.animeRow(animeId)!.title === `動畫 ${input.animeSn}`)
+      const animeId = this.ensureAnime(source, { animeSn: input.animeSn, title: undefined });
+      if (this.animeRow(animeId)!.title === placeholderTitle(source, input.animeSn))
         this.db.prepare('UPDATE anime SET title = ? WHERE id = ?').run(input.animeTitle, animeId);
-      const episodeId = this.upsertEpisode(animeId, input.videoSn, input.episodeLabel);
+      const episodeId = this.upsertEpisode(source, animeId, input.videoSn, input.episodeLabel);
       const completed = input.durationSec > 0 && input.progressSec / input.durationSec >= COMPLETED_RATIO ? 1 : 0;
       this.db
         .prepare(
@@ -381,15 +398,18 @@ export class Store {
   }
 
   /**
-   * 匯入動畫瘋觀看紀錄。已匯入過的同一筆只更新進度；與自動記錄重疊的略過；
-   * 其餘（包含重看同一集）都新增，所以不會因為動畫瘋覆蓋紀錄而遺失。
+   * 匯入來源網站的觀看紀錄。已匯入過的同一筆只更新進度；與自動記錄重疊的略過；
+   * 其餘（包含重看同一集）都新增，所以不會因為來源網站覆蓋紀錄而遺失。
    */
-  importWatches(items: BahamutImportItem[]): ImportResult & { covers: [string, string][] } {
+  importWatches(source: Source, items: BahamutImportItem[]): ImportResult & { covers: [string, string][] } {
     return transaction(this.db, () => {
       const result = { imported: 0, updated: 0, skipped: 0, covers: [] as [string, string][] };
       const near = this.db.prepare(
         `SELECT id, progress_sec, duration_sec, completed FROM watch_event
-         WHERE episode_id = ? AND source = ? AND ABS(julianday(started_at) - julianday(?)) * 1440 < ? LIMIT 1`,
+         WHERE episode_id = ? AND source = ?
+           AND julianday(?) <= julianday(last_seen_at) + ? / 1440.0
+           AND julianday(?) >= julianday(started_at) - ? / 1440.0
+         LIMIT 1`,
       );
       const update = this.db.prepare(
         'UPDATE watch_event SET progress_sec = ?, duration_sec = ?, completed = ?, last_seen_at = MAX(last_seen_at, ?) WHERE id = ?',
@@ -400,8 +420,8 @@ export class Store {
       );
       const seenAnime = new Set<string>();
       for (const item of items) {
-        const isNew = !this.findAnimeId(BAHAMUT, item.animeSn);
-        const animeId = this.ensureBahamutAnime({
+        const isNew = !this.findAnimeId(source, item.animeSn);
+        const animeId = this.ensureAnime(source, {
           animeSn: item.animeSn,
           title: isNew ? item.title : undefined,
           coverUrl: item.coverUrl,
@@ -411,25 +431,26 @@ export class Store {
           const cover = this.pendingCoverUrl(animeId);
           if (cover) result.covers.push([animeId, cover]);
         }
-        const known = this.db.prepare('SELECT id FROM episode WHERE source = ? AND external_id = ?').get(BAHAMUT, item.videoSn) as
-          | { id: string }
-          | undefined;
         // 已建檔的集數保留播放頁取得的名稱與順序
-        const episodeId = known?.id ?? this.upsertEpisode(animeId, item.videoSn, item.episodeLabel, labelOrder(item.episodeLabel));
+        const episodeId =
+          this.findEpisodeId(source, item.videoSn) ??
+          this.upsertEpisode(source, animeId, item.videoSn, item.episodeLabel, labelOrder(item.episodeLabel));
         const duration = item.durationSec ?? 0;
         const progress = item.progressSec ?? 0;
         const completed = item.completed || (duration > 0 && progress / duration >= COMPLETED_RATIO);
         const seenAt = item.lastSeenAt ?? item.watchedAt;
+        const overlaps = (kind: 'auto' | 'import', minutes: number) =>
+          near.get(episodeId, kind, item.watchedAt, minutes, seenAt, minutes) as
+            | { id: string; progress_sec: number; duration_sec: number; completed: number }
+            | undefined;
 
-        if (near.get(episodeId, 'auto', item.watchedAt, AUTO_MATCH_MINUTES)) {
+        if (overlaps('auto', AUTO_MATCH_MINUTES)) {
           result.skipped++;
           continue;
         }
-        const prev = near.get(episodeId, 'import', item.watchedAt, IMPORT_MATCH_MINUTES) as
-          | { id: string; progress_sec: number; duration_sec: number; completed: number }
-          | undefined;
+        const prev = overlaps('import', IMPORT_MATCH_MINUTES);
         if (prev) {
-          // 同一次觀看在動畫瘋上的進度可能還在增加
+          // 同一次觀看在來源網站上的進度可能還在增加
           const next = {
             progress: Math.max(prev.progress_sec, progress),
             duration: Math.max(prev.duration_sec, duration),
@@ -451,7 +472,7 @@ export class Store {
   watchHistory(limit = 50, before?: string): WatchHistoryItem[] {
     const rows = this.db
       .prepare(
-        `SELECT w.*, a.title AS anime_title, a.cover_path, e.label AS episode_label
+        `SELECT w.*, a.title AS anime_title, a.cover_path, e.label AS episode_label, e.source AS site
          FROM watch_event w JOIN anime a ON a.id = w.anime_id JOIN episode e ON e.id = w.episode_id
          WHERE (? IS NULL OR w.started_at < ?)
          ORDER BY w.started_at DESC LIMIT ?`,
@@ -460,11 +481,13 @@ export class Store {
       anime_title: string;
       cover_path: string | null;
       episode_label: string;
+      site: Source;
     })[];
     return rows.map((r) => ({
       ...toWatch(r),
       animeTitle: r.anime_title,
       episodeLabel: r.episode_label,
+      site: r.site,
       coverUrl: r.cover_path ? `/covers/${r.cover_path}` : null,
     }));
   }
@@ -483,8 +506,8 @@ export class Store {
   }
 
   putReview(id: string, input: ReviewPut): Review {
-    const animeId = input.animeId ?? (input.animeSn ? this.findAnimeId(BAHAMUT, input.animeSn) : undefined);
-    if (!animeId || !this.animeRow(animeId)) throw new NotFoundError('找不到評論對應的動畫');
+    const animeId = input.animeId ?? (input.animeSn ? this.findAnimeId(input.source ?? BAHAMUT, input.animeSn) : undefined);
+    if (!animeId || !this.animeRow(animeId)) throw new NotFoundError('找不到評論對應的作品');
     this.db
       .prepare(
         `INSERT INTO review (id, anime_id, episode_id, rating, content, spoiler, created_at, updated_at)
@@ -510,6 +533,95 @@ export class Store {
   deleteReview(id: string) {
     this.db.prepare('DELETE FROM review WHERE id = ?').run(id);
   }
+
+  // ---- 合併 ----
+
+  /** 名稱相似、來源不重疊，且沒有被標記為「不是同一部」的組合 */
+  mergeCandidates(): MergeCandidate[] {
+    const rows = this.db.prepare('SELECT * FROM anime').all() as unknown as AnimeRow[];
+    const sources = new Map<string, Set<string>>();
+    for (const r of this.db.prepare('SELECT anime_id, source FROM anime_source').all() as { anime_id: string; source: string }[]) {
+      if (!sources.has(r.anime_id)) sources.set(r.anime_id, new Set());
+      sources.get(r.anime_id)!.add(r.source);
+    }
+    const dismissed = new Set(
+      (this.db.prepare('SELECT a_id, b_id FROM merge_dismissed').all() as { a_id: string; b_id: string }[]).map(
+        (d) => `${d.a_id}|${d.b_id}`,
+      ),
+    );
+    const names = new Map(
+      rows.map((r) => [r.id, [r.title, ...(JSON.parse(r.alt_titles) as string[])].map(normalizeTitle).filter(Boolean)]),
+    );
+
+    const pairs: { a: AnimeRow; b: AnimeRow; score: number }[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) {
+        const [a, b] = rows[i]!.id < rows[j]!.id ? [rows[i]!, rows[j]!] : [rows[j]!, rows[i]!];
+        if (dismissed.has(`${a.id}|${b.id}`)) continue;
+        // 同一個來源的不同作品（例如動畫瘋的不同季）不列入
+        const sa = sources.get(a.id) ?? new Set<string>();
+        if ([...(sources.get(b.id) ?? [])].some((s) => sa.has(s))) continue;
+        let score = 0;
+        for (const x of names.get(a.id)!) for (const y of names.get(b.id)!) score = Math.max(score, titleSimilarity(x, y));
+        if (score >= CANDIDATE_MIN_SCORE) pairs.push({ a, b, score });
+      }
+    }
+    return pairs
+      .sort((x, y) => y.score - x.score)
+      .slice(0, CANDIDATE_LIMIT)
+      .map((p) => ({ a: this.summary(p.a), b: this.summary(p.b), score: Math.round(p.score * 100) / 100 }));
+  }
+
+  dismissMerge(aId: string, bId: string) {
+    const [a, b] = aId < bId ? [aId, bId] : [bId, aId];
+    if (!this.animeRow(a) || !this.animeRow(b)) throw new NotFoundError('找不到作品');
+    this.db.prepare('INSERT OR IGNORE INTO merge_dismissed (a_id, b_id, dismissed_at) VALUES (?, ?, ?)').run(a, b, now());
+  }
+
+  /** 把 sourceId 的來源、集數、觀看紀錄與評論併入 targetId，並刪除 sourceId */
+  merge(targetId: string, sourceId: string): AnimeDetail {
+    const target = this.animeRow(targetId);
+    const from = this.animeRow(sourceId);
+    if (!target || !from || targetId === sourceId) throw new NotFoundError('找不到要合併的作品');
+    transaction(this.db, () => {
+      for (const table of ['anime_source', 'episode', 'watch_event', 'review']) {
+        this.db.prepare(`UPDATE ${table} SET anime_id = ? WHERE anime_id = ?`).run(targetId, sourceId);
+      }
+      const altTitles = [...JSON.parse(target.alt_titles), from.title, ...JSON.parse(from.alt_titles)] as string[];
+      const unique = altTitles.filter((t, i) => t !== target.title && altTitles.indexOf(t) === i);
+      this.db
+        .prepare(
+          `UPDATE anime SET alt_titles = ?, cover_path = COALESCE(cover_path, ?), hidden = MAX(hidden, ?),
+             hidden_at = COALESCE(hidden_at, ?), created_at = MIN(created_at, ?), updated_at = ? WHERE id = ?`,
+        )
+        .run(JSON.stringify(unique), from.cover_path, from.hidden, from.hidden_at, from.created_at, now(), targetId);
+      this.db.prepare('DELETE FROM anime WHERE id = ?').run(sourceId);
+    });
+    return this.getAnime(targetId);
+  }
+}
+
+/** 比對用的名稱：全形轉半形、小寫、去掉空白與標點符號 */
+export function normalizeTitle(title: string) {
+  return title.normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
+}
+
+/** 兩個正規化名稱的相似度：一方包含另一方時依長度比例給分，否則用雙字組的 Dice 係數 */
+export function titleSimilarity(a: string, b: string) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (short.length >= 2 && long.includes(short)) return 0.6 + 0.4 * (short.length / long.length);
+  const grams = (s: string) => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < s.length - 1; i++) m.set(s.slice(i, i + 2), (m.get(s.slice(i, i + 2)) ?? 0) + 1);
+    return m;
+  };
+  const gb = grams(b);
+  let common = 0;
+  for (const [g, n] of grams(a)) common += Math.min(n, gb.get(g) ?? 0);
+  const total = a.length - 1 + (b.length - 1);
+  return total > 0 ? (2 * common) / total : 0;
 }
 
 function toWatch(r: WatchRow): WatchEvent {

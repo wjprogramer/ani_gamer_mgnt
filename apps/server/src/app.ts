@@ -9,12 +9,16 @@ import {
   bahamutImportSchema,
   bahamutStatusRequestSchema,
   bahamutWatchSchema,
+  mergeDismissSchema,
+  mergeSchema,
   reviewPutSchema,
+  SOURCES,
   snMapLookupSchema,
   snMapPutSchema,
   type AnimeFilter,
   type Health,
   type ImportResult,
+  type Source,
 } from '@agm/shared';
 import type { CoverQueue } from './covers.ts';
 import { NotFoundError, type Store } from './store.ts';
@@ -74,48 +78,59 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
 
   api.get('/health', (c) => c.json<Health>({ ok: true, version, dataDir }));
 
-  // ---- 動畫瘋（extension 使用） ----
+  // ---- 各來源（extension 使用），路徑為 /api/<source>/... ----
 
-  api.post('/bahamut/anime', async (c) => {
-    const { id, coverUrl } = store.upsertBahamutAnime(await body(c, bahamutAnimeUpsertSchema));
+  const site = new Hono<{ Variables: { source: Source } }>();
+  site.use('*', async (c, next) => {
+    c.set('source', c.req.param('source') as Source);
+    await next();
+  });
+
+  site.post('/anime', async (c) => {
+    const { id, coverUrl } = store.upsertAnime(c.get('source'), await body(c, bahamutAnimeUpsertSchema));
     queueCover(id, coverUrl);
     return c.json(store.getAnime(id));
   });
 
-  api.get('/bahamut/anime/:animeSn', (c) => {
-    const id = store.findAnimeId('bahamut', c.req.param('animeSn'));
+  site.get('/anime/:animeSn', (c) => {
+    const id = store.findAnimeId(c.get('source'), c.req.param('animeSn'));
     if (!id) throw new NotFoundError('尚未建檔');
     return c.json(store.getAnime(id));
   });
 
-  api.post('/bahamut/status', async (c) => c.json(store.cardStatus((await body(c, bahamutStatusRequestSchema)).animeSns)));
+  site.post('/status', async (c) =>
+    c.json(store.cardStatus(c.get('source'), (await body(c, bahamutStatusRequestSchema)).animeSns)),
+  );
 
-  api.post('/bahamut/hide', async (c) => {
-    const { id, coverUrl } = store.setHidden(await body(c, bahamutHideSchema));
+  site.post('/hide', async (c) => {
+    const { id, coverUrl } = store.setHidden(c.get('source'), await body(c, bahamutHideSchema));
     queueCover(id, coverUrl);
     return c.json({ id });
   });
 
-  api.get('/bahamut/hidden', (c) => c.json(store.hiddenBahamutSns()));
+  site.get('/hidden', (c) => c.json(store.hiddenIds(c.get('source'))));
 
-  api.post('/bahamut/sn-map/lookup', async (c) => c.json(store.lookupSnMap((await body(c, snMapLookupSchema)).videoSns)));
+  // 單集 sn 對應只有動畫瘋週期表需要
+  site.post('/sn-map/lookup', async (c) => c.json(store.lookupSnMap((await body(c, snMapLookupSchema)).videoSns)));
 
-  api.put('/bahamut/sn-map', async (c) => {
+  site.put('/sn-map', async (c) => {
     store.putSnMap((await body(c, snMapPutSchema)).entries);
     return c.body(null, 204);
   });
 
-  api.post('/bahamut/watch', async (c) => {
-    const { watch, coverUrl } = store.recordWatch(await body(c, bahamutWatchSchema));
+  site.post('/watch', async (c) => {
+    const { watch, coverUrl } = store.recordWatch(c.get('source'), await body(c, bahamutWatchSchema));
     queueCover(watch.animeId, coverUrl);
     return c.json(watch);
   });
 
-  api.post('/bahamut/import', async (c) => {
-    const { covers, ...result } = store.importWatches((await body(c, bahamutImportSchema)).items);
+  site.post('/import', async (c) => {
+    const { covers, ...result } = store.importWatches(c.get('source'), (await body(c, bahamutImportSchema)).items);
     for (const [id, url] of covers) queueCover(id, url);
     return c.json<ImportResult>(result);
   });
+
+  api.route(`/:source{${SOURCES.join('|')}}`, site);
 
   // ---- 管理 ----
 
@@ -143,6 +158,19 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
 
   api.delete('/reviews/:id', (c) => {
     store.deleteReview(c.req.param('id'));
+    return c.body(null, 204);
+  });
+
+  api.get('/merge/candidates', (c) => c.json(store.mergeCandidates()));
+
+  api.post('/merge', async (c) => {
+    const { targetId, sourceId } = await body(c, mergeSchema);
+    return c.json(store.merge(targetId, sourceId));
+  });
+
+  api.post('/merge/dismiss', async (c) => {
+    const { aId, bId } = await body(c, mergeDismissSchema);
+    store.dismissMerge(aId, bId);
     return c.body(null, 204);
   });
 

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { AnimeDetail, AnimeSummary, CardStatus, WatchEvent } from '@agm/shared';
+import type { AnimeDetail, AnimeSummary, CardStatus, MergeCandidate, WatchEvent } from '@agm/shared';
 import { createApp } from '../src/app.ts';
 import { openDb } from '../src/db.ts';
-import { Store } from '../src/store.ts';
+import { normalizeTitle, Store, titleSimilarity } from '../src/store.ts';
 
 const PORT = 17890;
 let app: ReturnType<typeof createApp>;
@@ -243,5 +243,150 @@ describe('評論與管理', () => {
     expect((await json<AnimeSummary[]>(call('GET', '/api/anime?filter=hidden'))).map((a) => a.id)).toEqual([id]);
     expect((await json<AnimeSummary[]>(call('GET', '/api/anime?q=100%25'))).map((a) => a.title)).toEqual(['另一部 100%']);
     expect((await call('GET', '/api/anime?filter=bad')).status).toBe(400);
+  });
+});
+
+describe('Netflix', () => {
+  const show = {
+    animeSn: '81000001',
+    title: '藥師少女的獨語',
+    coverUrl: 'https://occ-0-1.1.nflxso.net/dnm/api/v6/x.jpg',
+    episodes: [
+      { videoSn: '81000101', label: '1', sortOrder: 1001 },
+      { videoSn: '81000102', label: '2', sortOrder: 1002 },
+    ],
+  };
+  const item = (over: Record<string, unknown> = {}) => ({
+    animeSn: '81000001',
+    title: '藥師少女的獨語',
+    videoSn: '81000101',
+    watchedAt: '2026-10-23T12:00:00.000Z',
+    ...over,
+  });
+
+  it('與動畫瘋的 ID 分開管理', async () => {
+    await call('POST', '/api/bahamut/anime', { animeSn: '81000001', title: '動畫瘋的作品' });
+    await call('POST', '/api/netflix/anime', show);
+    await call('POST', '/api/netflix/hide', { animeSn: '81000001', hidden: true, at: '2026-10-23T00:00:00.000Z' });
+
+    expect(await json(call('GET', '/api/netflix/hidden'))).toEqual(['81000001']);
+    expect(await json(call('GET', '/api/bahamut/hidden'))).toEqual([]);
+    const detail = await json<AnimeDetail>(call('GET', '/api/netflix/anime/81000001'));
+    expect(detail).toMatchObject({ title: '藥師少女的獨語', sites: ['netflix'] });
+    expect(detail.sources[0]!.url).toBe('https://www.netflix.com/title/81000001');
+    expect((await call('GET', '/api/youtube/hidden')).status).toBe(404);
+  });
+
+  it('同步時開始時間的推算值有誤差也視為同一次；隔天重看另外保留', async () => {
+    await call('POST', '/api/netflix/anime', show);
+    await call('POST', '/api/netflix/import', {
+      items: [item({ lastSeenAt: '2026-10-23T12:10:00.000Z', progressSec: 600, durationSec: 1440 })],
+    });
+    const again = await json(
+      call('POST', '/api/netflix/import', {
+        items: [
+          item({ watchedAt: '2026-10-23T12:01:30.000Z', lastSeenAt: '2026-10-23T12:24:00.000Z', progressSec: 1400, durationSec: 1440 }),
+        ],
+      }),
+    );
+    expect(again).toEqual({ imported: 0, updated: 1, skipped: 0 });
+
+    const nextDay = await json(
+      call('POST', '/api/netflix/import', {
+        items: [item({ watchedAt: '2026-10-24T20:00:00.000Z', lastSeenAt: '2026-10-24T20:05:00.000Z', progressSec: 300 })],
+      }),
+    );
+    expect(nextDay).toEqual({ imported: 1, updated: 0, skipped: 0 });
+    const history = await json<WatchEvent[]>(call('GET', '/api/watch'));
+    expect(history).toHaveLength(2);
+    expect(history[1]).toMatchObject({ progressSec: 1400, completed: true, lastSeenAt: '2026-10-23T12:24:00.000Z' });
+  });
+
+  it('與本機播放時的自動記錄重疊時略過', async () => {
+    await call('POST', '/api/netflix/anime', show);
+    await call(
+      'POST',
+      '/api/netflix/watch',
+      watch({
+        animeSn: '81000001',
+        videoSn: '81000101',
+        startedAt: '2026-10-23T12:00:00.000Z',
+        at: '2026-10-23T12:24:00.000Z',
+        progressSec: 1400,
+      }),
+    );
+    const res = await json(
+      call('POST', '/api/netflix/import', { items: [item({ watchedAt: '2026-10-23T12:03:00.000Z', lastSeenAt: '2026-10-23T12:24:00.000Z' })] }),
+    );
+    expect(res).toEqual({ imported: 0, updated: 0, skipped: 1 });
+  });
+});
+
+describe('合併', () => {
+  async function seed() {
+    const s1 = await json<AnimeDetail>(call('POST', '/api/bahamut/anime', { animeSn: '1', title: '藥師少女的獨語' }));
+    const s2 = await json<AnimeDetail>(call('POST', '/api/bahamut/anime', { animeSn: '2', title: '藥師少女的獨語 第二季' }));
+    const nf = await json<AnimeDetail>(
+      call('POST', '/api/netflix/anime', { animeSn: '81000001', title: '藥師少女的獨語', episodes: [{ videoSn: '81000101', label: '1', sortOrder: 1001 }] }),
+    );
+    await call('POST', '/api/bahamut/anime', { animeSn: '3', title: '完全不同的動畫' });
+    return { s1, s2, nf };
+  }
+  const candidates = () => json<MergeCandidate[]>(call('GET', '/api/merge/candidates'));
+  const pairKey = (c: MergeCandidate) => [c.a.id, c.b.id].sort().join('|');
+  const key = (x: string, y: string) => [x, y].sort().join('|');
+
+  it('列出名稱相似、來源不同的作品', async () => {
+    const { s1, s2, nf } = await seed();
+    const list = await candidates();
+    // 同為動畫瘋的第一季與第二季不列入
+    expect(list.map(pairKey).sort()).toEqual([key(s1.id, nf.id), key(s2.id, nf.id)].sort());
+    expect(list[0]).toMatchObject({ score: 1 });
+  });
+
+  it('標記為不是同一部之後不再列出', async () => {
+    const { s2, nf } = await seed();
+    expect((await call('POST', '/api/merge/dismiss', { aId: nf.id, bId: s2.id })).status).toBe(204);
+    expect((await candidates()).map(pairKey)).not.toContain(key(s2.id, nf.id));
+  });
+
+  it('合併後來源、集數、觀看紀錄與評論都移到保留的作品', async () => {
+    const { s1, nf } = await seed();
+    await call(
+      'POST',
+      '/api/netflix/watch',
+      watch({ id: 'NW', animeSn: '81000001', videoSn: '81000101', episodeLabel: '1' }),
+    );
+    await call('PUT', '/api/reviews/R1', {
+      animeId: nf.id,
+      content: '好看',
+      createdAt: '2026-10-23T00:00:00.000Z',
+      updatedAt: '2026-10-23T00:00:00.000Z',
+    });
+
+    const merged = await json<AnimeDetail>(call('POST', '/api/merge', { targetId: s1.id, sourceId: nf.id }));
+    expect(merged.sites).toEqual(['bahamut', 'netflix']);
+    expect(merged.episodes.map((e) => e.source)).toEqual(['netflix']);
+    expect(merged.episodes[0]!.watches.map((w) => w.id)).toEqual(['NW']);
+    expect(merged.reviews.map((r) => r.id)).toEqual(['R1']);
+    expect((await call('GET', `/api/anime/${nf.id}`)).status).toBe(404);
+    // Netflix 那邊之後的資料也會寫到合併後的作品
+    expect((await json<AnimeDetail>(call('GET', '/api/netflix/anime/81000001'))).id).toBe(s1.id);
+    expect((await candidates()).map(pairKey)).not.toContain(key(s1.id, nf.id));
+  });
+});
+
+describe('titleSimilarity', () => {
+  it.each([
+    ['藥師少女的獨語', '藥師少女的獨語', 1],
+    ['葬送的芙莉蓮', '完全不同的動畫', 0],
+  ])('%s / %s', (a, b, expected) => {
+    expect(titleSimilarity(normalizeTitle(a), normalizeTitle(b))).toBeCloseTo(expected);
+  });
+  it('一方包含另一方時分數較高', () => {
+    expect(titleSimilarity(normalizeTitle('藥師少女的獨語'), normalizeTitle('藥師少女的獨語 第二季'))).toBeGreaterThan(0.8);
+  });
+  it('忽略全形與標點', () => {
+    expect(normalizeTitle('ＳＰＹ×ＦＡＭＩＬＹ')).toBe(normalizeTitle('SPY FAMILY'));
   });
 });

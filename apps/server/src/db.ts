@@ -71,6 +71,15 @@ const migrations: string[] = [
     PRIMARY KEY (source, episode_sn)
   );
   `,
+  // 合併頁按「不是同一部」的組合；a_id < b_id
+  `
+  CREATE TABLE merge_dismissed (
+    a_id         TEXT NOT NULL REFERENCES anime(id) ON DELETE CASCADE,
+    b_id         TEXT NOT NULL REFERENCES anime(id) ON DELETE CASCADE,
+    dismissed_at TEXT NOT NULL,
+    PRIMARY KEY (a_id, b_id)
+  );
+  `,
 ];
 
 export function openDb(file: string): DatabaseSync {

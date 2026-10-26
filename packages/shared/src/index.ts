@@ -5,6 +5,13 @@ export { ulid } from 'ulid';
 export const DEFAULT_PORT = 17890;
 export const DEFAULT_SERVER_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 export const BAHAMUT = 'bahamut';
+export const NETFLIX = 'netflix';
+export const SOURCES = [BAHAMUT, NETFLIX] as const;
+export type Source = (typeof SOURCES)[number];
+export const SOURCE_LABELS: Record<Source, string> = { bahamut: '動畫瘋', netflix: 'Netflix' };
+/** 電影只有一集，以此為集數名稱 */
+export const MOVIE_LABEL = '電影';
+export const isSource = (s: string): s is Source => (SOURCES as readonly string[]).includes(s);
 /** 進度達到片長的這個比例即視為看完 */
 export const COMPLETED_RATIO = 0.85;
 
@@ -12,6 +19,8 @@ const sn = z.string().regex(/^\d+$/);
 const isoTime = z.iso.datetime();
 
 // ---- 請求 ----
+// 以下 schema 各來源共用（路徑為 /api/<source>/...）。欄位沿用動畫瘋的命名：
+// animeSn 是來源的作品 ID（Netflix 為 title ID），videoSn 是單集 ID（Netflix 為 video ID；電影與作品相同）。
 
 export const bahamutAnimeUpsertSchema = z.object({
   animeSn: sn,
@@ -54,7 +63,7 @@ export const bahamutWatchSchema = z.object({
 });
 export type BahamutWatch = z.infer<typeof bahamutWatchSchema>;
 
-/** 從動畫瘋觀看紀錄匯入 */
+/** 從來源網站的觀看紀錄匯入 */
 export const bahamutImportSchema = z.object({
   items: z
     .array(
@@ -64,6 +73,7 @@ export const bahamutImportSchema = z.object({
         coverUrl: z.url().optional(),
         videoSn: sn,
         episodeLabel: z.string().optional(),
+        /** 開始觀看的時間（Netflix 為推算值） */
         watchedAt: isoTime,
         /** 最後一次回報進度的時間 */
         lastSeenAt: isoTime.optional(),
@@ -89,6 +99,8 @@ export const reviewPutSchema = z
   .object({
     animeId: z.string().optional(),
     animeSn: sn.optional(),
+    /** 搭配 animeSn 使用，預設為動畫瘋 */
+    source: z.enum(SOURCES).optional(),
     episodeId: z.string().nullable().optional(),
     rating: z.number().int().min(1).max(5).nullable().optional(),
     content: z.string(),
@@ -98,6 +110,17 @@ export const reviewPutSchema = z
   })
   .refine((r) => r.animeId || r.animeSn, { message: '需要 animeId 或 animeSn' });
 export type ReviewPut = z.input<typeof reviewPutSchema>;
+
+export const mergeSchema = z.object({
+  /** 保留的作品 */
+  targetId: z.string().min(1),
+  /** 併入後刪除的作品 */
+  sourceId: z.string().min(1),
+});
+export type MergeRequest = z.infer<typeof mergeSchema>;
+
+export const mergeDismissSchema = z.object({ aId: z.string().min(1), bId: z.string().min(1) });
+export type MergeDismiss = z.infer<typeof mergeDismissSchema>;
 
 export const animePatchSchema = z.object({
   hidden: z.boolean().optional(),
@@ -166,6 +189,8 @@ export interface Episode {
 export interface AnimeSummary {
   id: string;
   title: string;
+  /** 這部作品有資料的網站 */
+  sites: Source[];
   coverUrl: string | null;
   hidden: boolean;
   hiddenAt: string | null;
@@ -187,8 +212,18 @@ export interface AnimeDetail extends AnimeSummary {
 
 export interface WatchHistoryItem extends WatchEvent {
   animeTitle: string;
+  /** 在哪個網站看的 */
+  site: Source;
   episodeLabel: string;
   coverUrl: string | null;
 }
 
 export type AnimeFilter = 'all' | 'hidden' | 'watched' | 'reviewed';
+
+/** 疑似同一部作品 */
+export interface MergeCandidate {
+  a: AnimeSummary;
+  b: AnimeSummary;
+  /** 名稱相似度 0–1 */
+  score: number;
+}

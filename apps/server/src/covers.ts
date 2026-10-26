@@ -16,7 +16,8 @@ export function createCoverQueue(store: Store, coversDir: string, fetchImpl: typ
     pending.add(animeId);
     chain = chain
       .then(async () => {
-        const res = await fetchImpl(url, { headers: { Referer: 'https://ani.gamer.com.tw/' } });
+        const referer = new URL(url).hostname.endsWith('bahamut.com.tw') ? { Referer: 'https://ani.gamer.com.tw/' } : undefined;
+        const res = await fetchImpl(url, { headers: referer });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const type = res.headers.get('content-type')?.split(';')[0] ?? '';
         const file = `${animeId}.${EXT[type] ?? 'jpg'}`;
