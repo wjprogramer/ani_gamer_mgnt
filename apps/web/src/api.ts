@@ -50,6 +50,9 @@ export const api = {
   deleteWatch: (id: string) => request<null>('DELETE', `/watch/${id}`),
   putReview: (id: string, review: ReviewPut) => request<Review>('PUT', `/reviews/${id}`, review),
   deleteReview: (id: string) => request<null>('DELETE', `/reviews/${id}`),
+  addRelation: (id: string, targetId: string) => request<AnimeDetail>('POST', `/anime/${id}/relations`, { targetId }),
+  removeRelation: (id: string, source: string, externalId: string) =>
+    request<AnimeDetail>('DELETE', `/anime/${id}/relations/${source}/${externalId}`),
   mergeCandidates: () => request<MergeCandidate[]>('GET', '/merge/candidates'),
   merge: (targetId: string, sourceId: string) => request<AnimeDetail>('POST', '/merge', { targetId, sourceId }),
   dismissMerge: (aId: string, bId: string) => request<null>('POST', '/merge/dismiss', { aId, bId }),

@@ -142,6 +142,13 @@ td { border-bottom: 1px solid var(--line); padding: 6px 8px; }
 .merge-search ul { list-style: none; margin: 8px 0 0; padding: 0; }
 .merge-search li { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
 
+.related { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.related li { display: flex; gap: 10px; align-items: center; }
+.related li > a { display: flex; flex: 1; gap: 10px; align-items: center; color: inherit; min-width: 0; }
+.related img, .related .no-cover { width: 48px; height: 64px; object-fit: cover; border-radius: 4px; flex: none; font-size: .7rem; border: 1px solid var(--line); }
+.related .grow { display: flex; flex-direction: column; min-width: 0; }
+.related-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 700px) {
   .merge-list li { grid-template-columns: 1fr; }
   .merge-actions { flex-direction: row; flex-wrap: wrap; }

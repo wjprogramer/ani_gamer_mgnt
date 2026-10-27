@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router';
-import { ulid, type AnimeDetail, type AnimeGroup, type AnimeSummary, type Review } from '@agm/shared';
+import { ulid, type AnimeDetail, type AnimeGroup, type AnimeSummary, type RelatedAnime, type Review } from '@agm/shared';
 import { api, episodeText, formatDuration, formatTime, progressText, siteLabel } from '../api.ts';
 import { FavoriteButton, Stars } from '../components.tsx';
 
@@ -53,41 +53,104 @@ function GroupPicker({ anime, onChange }: { anime: AnimeDetail; onChange: (a: An
   );
 }
 
-/** 搜尋其他作品併入目前這部（合併頁沒列出時使用） */
-function MergeSearch({ anime, onMerged }: { anime: AnimeDetail; onMerged: () => void }) {
+/** 搜尋其他作品（包含已隱藏的）並對選到的作品執行動作 */
+function AnimeSearch({
+  excludeIds,
+  placeholder,
+  actionLabel,
+  onPick,
+}: {
+  excludeIds: string[];
+  placeholder: string;
+  actionLabel: string;
+  /** 回傳 false 表示取消，保留搜尋結果 */
+  onPick: (a: AnimeSummary) => Promise<boolean>;
+}) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<AnimeSummary[]>([]);
+  const exclude = excludeIds.join(',');
 
   useEffect(() => {
     if (!q.trim()) return setResults([]);
     const timer = setTimeout(() => {
-      void api.listAnime({ q: q.trim(), includeHidden: true }).then((list) => setResults(list.filter((a) => a.id !== anime.id).slice(0, 10)));
+      void api
+        .listAnime({ q: q.trim(), includeHidden: true })
+        .then((list) => setResults(list.filter((a) => !exclude.split(',').includes(a.id)).slice(0, 10)));
     }, 200);
     return () => clearTimeout(timer);
-  }, [q, anime.id]);
+  }, [q, exclude]);
 
-  async function merge(other: AnimeSummary) {
-    if (!window.confirm(`把「${other.title}」併入「${anime.title}」？
-觀看紀錄與評論會移到這部作品，此操作無法復原。`)) return;
-    await api.merge(anime.id, other.id);
-    setQ('');
-    onMerged();
+  async function pick(a: AnimeSummary) {
+    if (await onPick(a)) setQ('');
   }
 
   return (
     <div className="merge-search">
-      <input type="search" placeholder="搜尋要併入這部的作品" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input type="search" placeholder={placeholder} value={q} onChange={(e) => setQ(e.target.value)} />
       <ul>
         {results.map((a) => (
           <li key={a.id}>
             <span className="grow">
               {a.title} <span className="muted small">{a.sites.map(siteLabel).join('・')}</span>
             </span>
-            <button onClick={() => void merge(a)}>併入這部</button>
+            <button onClick={() => void pick(a)}>{actionLabel}</button>
           </li>
         ))}
       </ul>
     </div>
+  );
+}
+
+/** 相關作品：已建檔的連到管理頁，尚未建檔的連到來源網站 */
+function RelatedList({ anime, onChange }: { anime: AnimeDetail; onChange: (a: AnimeDetail) => void }) {
+  async function remove(r: RelatedAnime) {
+    if (!window.confirm(`移除與「${r.title}」的關聯？`)) return;
+    onChange(await api.removeRelation(anime.id, r.source, r.externalId));
+  }
+
+  return (
+    <ul className="related">
+      {anime.related.map((r) => {
+        const body = (
+          <>
+            {r.coverUrl ? (
+              // 尚未建檔時是來源網站的圖片，不帶 Referer 以免被擋
+              <img src={r.coverUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
+            ) : (
+              <div className="no-cover">無封面</div>
+            )}
+            <span className="grow">
+              <span className="related-title">{r.title}</span>
+              <span className="muted small">
+                {r.anime ? (
+                  <>
+                    {r.anime.sites.map(siteLabel).join('・')}・{progressText(r.anime)} <Stars rating={r.anime.rating} />
+                    {r.anime.favorite && ' ♥'}
+                  </>
+                ) : (
+                  `${siteLabel(r.source)}・尚未建檔`
+                )}
+                {r.origin === 'manual' && '・手動'}
+              </span>
+            </span>
+          </>
+        );
+        return (
+          <li key={r.source + r.externalId}>
+            {r.anime ? (
+              <Link to={`/anime/${r.anime.id}`}>{body}</Link>
+            ) : (
+              <a href={r.url} target="_blank" rel="noreferrer">
+                {body}
+              </a>
+            )}
+            <button className="link danger" onClick={() => void remove(r)}>
+              移除
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -129,6 +192,19 @@ export function AnimeDetailPage() {
     });
     setDraft(emptyDraft());
     await load();
+  }
+
+  async function merge(other: AnimeSummary) {
+    if (!window.confirm(`把「${other.title}」併入「${anime!.title}」？
+觀看紀錄與評論會移到這部作品，此操作無法復原。`)) return false;
+    await api.merge(id, other.id);
+    await load();
+    return true;
+  }
+
+  async function addRelation(other: AnimeSummary) {
+    setAnime(await api.addRelation(id, other.id));
+    return true;
   }
 
   async function removeReview(r: Review) {
@@ -278,9 +354,22 @@ export function AnimeDetailPage() {
       </section>
 
       <section>
+        <h2>相關作品</h2>
+        <p className="muted small">續作、前傳等，每部仍是獨立的作品。動畫瘋的「相關動畫」會自動加入，也可以手動新增或移除。</p>
+        {anime.related.length === 0 && <p className="muted">沒有相關作品。</p>}
+        <RelatedList anime={anime} onChange={setAnime} />
+        <AnimeSearch
+          excludeIds={[anime.id, ...anime.related.flatMap((r) => (r.anime ? [r.anime.id] : []))]}
+          placeholder="搜尋要關聯的作品"
+          actionLabel="加入關聯"
+          onPick={addRelation}
+        />
+      </section>
+
+      <section>
         <h2>合併其他作品</h2>
         {anime.altTitles.length > 0 && <p className="muted small">其他名稱：{anime.altTitles.join('、')}</p>}
-        <MergeSearch anime={anime} onMerged={() => void load()} />
+        <AnimeSearch excludeIds={[anime.id]} placeholder="搜尋要併入這部的作品" actionLabel="併入這部" onPick={merge} />
       </section>
 
       <section>
