@@ -30,6 +30,8 @@ export function AnimeListPage() {
   const filter = (params.get('filter') as AnimeFilter) || 'all';
   const q = params.get('q') ?? '';
   const site = params.get('site') ?? '';
+  // 網址中以逗號分隔；沒選任何來源表示全部
+  const sites = site.split(',').filter((s): s is Source => (SOURCES as readonly string[]).includes(s));
   const group = params.get('group') ?? '';
   const rating = params.get('rating') ?? '';
   const sort = (params.get('sort') as AnimeSort) || 'default';
@@ -46,7 +48,7 @@ export function AnimeListPage() {
           filter,
           q,
           sort,
-          site: (site || undefined) as Source | undefined,
+          sites,
           groupId: group || undefined,
           rating: rating === 'unrated' ? 'unrated' : rating ? Number(rating) : undefined,
         })
@@ -54,6 +56,9 @@ export function AnimeListPage() {
     }, 200);
     return () => clearTimeout(timer);
   }, [filter, q, site, group, rating, sort]);
+
+  const toggleSite = (s: Source) =>
+    update({ site: (sites.includes(s) ? sites.filter((x) => x !== s) : [...sites, s]).join(',') });
 
   const update = (next: Record<string, string>) => {
     const merged: Record<string, string> = { filter, q, site, group, rating, sort, ...next };
@@ -91,14 +96,19 @@ export function AnimeListPage() {
         <input type="search" placeholder="搜尋作品名稱" value={q} onChange={(e) => update({ q: e.target.value })} />
       </div>
       <div className="toolbar">
-        <select value={site} onChange={(e) => update({ site: e.target.value })} aria-label="來源">
-          <option value="">所有來源</option>
+        <div className="chips" role="group" aria-label="來源">
           {SOURCES.map((s) => (
-            <option key={s} value={s}>
+            <button
+              key={s}
+              type="button"
+              className={sites.includes(s) ? 'chip active' : 'chip'}
+              aria-pressed={sites.includes(s)}
+              onClick={() => toggleSite(s)}
+            >
               {siteLabel(s)}
-            </option>
+            </button>
           ))}
-        </select>
+        </div>
         <select value={group} onChange={(e) => update({ group: e.target.value })} aria-label="分群">
           <option value="">所有分群</option>
           {groups.map((g) => (

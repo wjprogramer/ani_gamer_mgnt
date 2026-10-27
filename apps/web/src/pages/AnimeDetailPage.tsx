@@ -61,7 +61,7 @@ function MergeSearch({ anime, onMerged }: { anime: AnimeDetail; onMerged: () => 
   useEffect(() => {
     if (!q.trim()) return setResults([]);
     const timer = setTimeout(() => {
-      void api.listAnime({ q: q.trim() }).then((list) => setResults(list.filter((a) => a.id !== anime.id).slice(0, 10)));
+      void api.listAnime({ q: q.trim(), includeHidden: true }).then((list) => setResults(list.filter((a) => a.id !== anime.id).slice(0, 10)));
     }, 200);
     return () => clearTimeout(timer);
   }, [q, anime.id]);

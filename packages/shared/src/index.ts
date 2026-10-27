@@ -256,8 +256,11 @@ export const ANIME_SORTS: AnimeSort[] = ['default', 'title', 'rating', 'created'
 export interface AnimeListQuery {
   filter?: AnimeFilter;
   q?: string;
-  site?: Source;
+  /** 符合任一來源；空陣列或省略表示全部 */
+  sites?: Source[];
   groupId?: string;
+  /** 「已隱藏」以外的篩選預設不含已隱藏的作品 */
+  includeHidden?: boolean;
   /** 1–5：N 星以上；unrated：未評分 */
   rating?: number | 'unrated';
   sort?: AnimeSort;

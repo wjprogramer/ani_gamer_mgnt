@@ -163,3 +163,7 @@ h1 .favorite { font-size: 1.5rem; }
 
 .groups { list-style: none; margin: 12px 0 0; padding: 0; }
 .groups li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border-radius: 999px; padding: 2px 12px; font-size: .9rem; color: var(--muted); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }

@@ -153,13 +153,22 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
     if (!ANIME_FILTERS.includes(filter)) throw bad('filter');
     const sort = (query('sort') ?? 'default') as AnimeSort;
     if (!ANIME_SORTS.includes(sort)) throw bad('sort');
-    const site = query('site');
-    if (site !== undefined && !isSource(site)) throw bad('site');
+    // 多個來源以逗號分隔
+    const sites = (query('site') ?? '').split(',').filter(Boolean);
+    if (!sites.every(isSource)) throw bad('site');
     const ratingParam = query('rating');
     const rating = ratingParam === 'unrated' ? 'unrated' : ratingParam === undefined ? undefined : Number(ratingParam);
     if (typeof rating === 'number' && !(Number.isInteger(rating) && rating >= 1 && rating <= 5)) throw bad('rating');
     return c.json(
-      store.listAnime({ filter, sort, q: query('q'), site: site as Source | undefined, groupId: query('group'), rating }),
+      store.listAnime({
+        filter,
+        sort,
+        rating,
+        q: query('q'),
+        sites: sites as Source[],
+        groupId: query('group'),
+        includeHidden: query('hidden') === 'include',
+      }),
     );
   });
 

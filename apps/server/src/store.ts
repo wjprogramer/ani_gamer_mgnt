@@ -306,13 +306,24 @@ export class Store {
     };
   }
 
-  listAnime({ filter = 'all', q = '', site, groupId, rating, sort = 'default' }: AnimeListQuery = {}): AnimeSummary[] {
+  listAnime({
+    filter = 'all',
+    q = '',
+    sites = [],
+    groupId,
+    rating,
+    sort = 'default',
+    includeHidden = false,
+  }: AnimeListQuery = {}): AnimeSummary[] {
     const where: string[] = [];
     const params: string[] = [];
-    if (site) {
-      where.push('EXISTS (SELECT 1 FROM anime_source s WHERE s.anime_id = a.id AND s.source = ?)');
-      params.push(site);
+    if (sites.length) {
+      where.push(
+        `EXISTS (SELECT 1 FROM anime_source s WHERE s.anime_id = a.id AND s.source IN (${sites.map(() => '?').join(',')}))`,
+      );
+      params.push(...sites);
     }
+    if (filter !== 'hidden' && !includeHidden) where.push('a.hidden = 0');
     if (groupId) {
       where.push('EXISTS (SELECT 1 FROM anime_group_member m WHERE m.anime_id = a.id AND m.group_id = ?)');
       params.push(groupId);

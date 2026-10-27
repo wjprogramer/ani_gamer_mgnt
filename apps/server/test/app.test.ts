@@ -239,7 +239,9 @@ describe('評論與管理', () => {
     await call('POST', '/api/bahamut/anime', { animeSn: '2', title: '另一部 100%' });
     await call('PATCH', `/api/anime/${id}`, { hidden: true });
 
-    expect((await json<AnimeSummary[]>(call('GET', '/api/anime'))).length).toBe(2);
+    // 預設不含已隱藏的作品
+    expect((await json<AnimeSummary[]>(call('GET', '/api/anime'))).map((a) => a.title)).toEqual(['另一部 100%']);
+    expect((await json<AnimeSummary[]>(call('GET', '/api/anime?hidden=include'))).length).toBe(2);
     expect((await json<AnimeSummary[]>(call('GET', '/api/anime?filter=hidden'))).map((a) => a.id)).toEqual([id]);
     expect((await json<AnimeSummary[]>(call('GET', '/api/anime?q=100%25'))).map((a) => a.title)).toEqual(['另一部 100%']);
     expect((await call('GET', '/api/anime?filter=bad')).status).toBe(400);
@@ -433,6 +435,10 @@ describe('列表依來源篩選', () => {
     expect((await json<AnimeSummary[]>(call('GET', '/api/anime?site=netflix'))).map((a) => a.title)).toEqual(['Netflix 的']);
     expect((await json<AnimeSummary[]>(call('GET', '/api/anime?site=bahamut'))).map((a) => a.title)).toEqual(['動畫瘋的']);
     expect((await call('GET', '/api/anime?site=youtube')).status).toBe(400);
+    expect((await json<AnimeSummary[]>(call('GET', '/api/anime?site=bahamut,netflix&sort=title'))).map((a) => a.title)).toEqual([
+      '動畫瘋的',
+      'Netflix 的',
+    ]);
   });
 });
 
