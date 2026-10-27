@@ -27,17 +27,19 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  listAnime: ({ groupId, ratings, sites, includeHidden, ...rest }: AnimeListQuery) => {
+  listAnime: ({ groupId, ratings, sites, includeHidden, favorite, ...rest }: AnimeListQuery) => {
     const params = Object.entries({
       ...rest,
       group: groupId,
       rating: ratings?.join(','),
       site: sites?.join(','),
       hidden: includeHidden ? 'include' : undefined,
+      favorite: favorite === undefined ? undefined : favorite ? '1' : '0',
     });
     const query = new URLSearchParams(params.filter((e): e is [string, string] => !!e[1]));
     return request<AnimeSummary[]>('GET', `/anime?${query}`);
   },
+  setRating: (id: string, rating: number | null) => request<AnimeDetail>('PUT', `/anime/${id}/rating`, { rating }),
   setAnimeGroups: (id: string, groupIds: string[]) => request<AnimeDetail>('PUT', `/anime/${id}/groups`, { groupIds }),
   listGroups: () => request<AnimeGroup[]>('GET', '/groups'),
   createGroup: (name: string) => request<AnimeGroup>('POST', '/groups', { name }),

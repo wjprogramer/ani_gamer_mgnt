@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { ANIME_RATINGS, SOURCES, type AnimeFilter, type AnimeGroup, type AnimeProgress, type AnimeSort, type AnimeSummary, type Source } from '@agm/shared';
+import { ANIME_RATINGS, SOURCES, ulid, type AnimeFilter, type AnimeDetail, type AnimeGroup, type AnimeProgress, type AnimeSort, type AnimeSummary, type Source } from '@agm/shared';
 import { api, formatTime, progressText, siteLabel } from '../api.ts';
-import { FavoriteButton, MultiSelect, Stars } from '../components.tsx';
+import { FavoriteButton, MultiSelect, Popover, RatingInput, Stars } from '../components.tsx';
 
 const FILTERS: { value: AnimeFilter; label: string }[] = [
   { value: 'all', label: '全部' },
-  { value: 'favorite', label: '收藏' },
   { value: 'watched', label: '看過' },
   { value: 'reviewed', label: '有評論' },
 ];
@@ -18,6 +17,12 @@ const SORTS: { value: AnimeSort; label: string }[] = [
   { value: 'created', label: '最新建檔' },
 ];
 
+const FAVORITE = [
+  { value: '', label: '所有收藏' },
+  { value: '1', label: '已收藏' },
+  { value: '0', label: '沒收藏' },
+];
+
 const PROGRESS: { value: AnimeProgress | ''; label: string }[] = [
   { value: '', label: '所有進度' },
   { value: 'completed', label: '已看完' },
@@ -26,6 +31,63 @@ const PROGRESS: { value: AnimeProgress | ''; label: string }[] = [
 ];
 
 const RATING_OPTIONS = ANIME_RATINGS.map((r) => ({ value: r, label: r === 'unrated' ? '未評分' : '★'.repeat(r) }));
+
+/** 列表卡片上的快速動作：評分、寫評論、加入分群 */
+function CardActions({
+  anime,
+  groups,
+  onChange,
+}: {
+  anime: AnimeSummary;
+  groups: AnimeGroup[];
+  onChange: (a: AnimeDetail) => void;
+}) {
+  const [content, setContent] = useState('');
+  const [spoiler, setSpoiler] = useState(false);
+
+  async function saveReview(e: FormEvent, close: () => void) {
+    e.preventDefault();
+    if (!content.trim()) return;
+    const now = new Date().toISOString();
+    await api.putReview(ulid(), { animeId: anime.id, content: content.trim(), spoiler, createdAt: now, updatedAt: now });
+    setContent('');
+    setSpoiler(false);
+    close();
+    onChange(await api.getAnime(anime.id));
+  }
+
+  return (
+    <div className="card-actions">
+      <RatingInput value={anime.rating} onChange={(r) => void api.setRating(anime.id, r).then(onChange)} />
+      <span className="grow" />
+      <Popover className="quick" title="寫評論" summary={`評論${anime.reviewCount ? ` ${anime.reviewCount}` : ''}`}>
+        {(close) => (
+          <form className="quick-review" onSubmit={(e) => void saveReview(e, close)}>
+            <textarea rows={4} placeholder={`對「${anime.title}」的想法…`} value={content} onChange={(e) => setContent(e.target.value)} />
+            <div className="row small">
+              <label className="row small">
+                <input type="checkbox" checked={spoiler} onChange={(e) => setSpoiler(e.target.checked)} />
+                含劇透
+              </label>
+              <span className="grow" />
+              <button className="primary" disabled={!content.trim()}>
+                儲存
+              </button>
+            </div>
+          </form>
+        )}
+      </Popover>
+      <MultiSelect
+        label="分群"
+        summary={`分群${anime.groupIds.length ? ` ${anime.groupIds.length}` : ''}`}
+        options={groups.map((g) => ({ value: g.id, label: g.name }))}
+        value={anime.groupIds}
+        onChange={(ids) => void api.setAnimeGroups(anime.id, ids).then(onChange)}
+        empty={<Link to="/groups">先到分群頁新增分群</Link>}
+      />
+    </div>
+  );
+}
 
 export function AnimeListPage() {
   const [params, setParams] = useSearchParams();
@@ -43,6 +105,8 @@ export function AnimeListPage() {
   // 與其他篩選獨立；開啟時已隱藏的作品也一起列出
   const showHidden = params.get('hidden') === '1';
   const progress = PROGRESS.find((p) => p.value === params.get('progress'))?.value ?? '';
+  // 舊網址的 filter=favorite 視同已收藏
+  const favorite = params.get('favorite') ?? (params.get('filter') === 'favorite' ? '1' : '');
   const [items, setItems] = useState<AnimeSummary[] | null>(null);
   const [groups, setGroups] = useState<AnimeGroup[]>([]);
   const [error, setError] = useState('');
@@ -61,17 +125,18 @@ export function AnimeListPage() {
           ratings,
           includeHidden: showHidden,
           progress: progress || undefined,
+          favorite: favorite === '' ? undefined : favorite === '1',
         })
         .then(setItems, (e: Error) => setError(e.message));
     }, 200);
     return () => clearTimeout(timer);
-  }, [filter, q, site, group, rating, sort, showHidden, progress]);
+  }, [filter, q, site, group, rating, sort, showHidden, progress, favorite]);
 
   const toggleSite = (s: Source) =>
     update({ site: (sites.includes(s) ? sites.filter((x) => x !== s) : [...sites, s]).join(',') });
 
   const update = (next: Record<string, string>) => {
-    const merged: Record<string, string> = { filter, q, site, group, rating, progress, sort, hidden: showHidden ? '1' : '', ...next };
+    const merged: Record<string, string> = { filter, q, site, group, rating, progress, favorite, sort, hidden: showHidden ? '1' : '', ...next };
     // 預設值不放進網址
     if (merged.filter === 'all') delete merged.filter;
     if (merged.sort === 'default') delete merged.sort;
@@ -81,11 +146,14 @@ export function AnimeListPage() {
   async function toggleFavorite(a: AnimeSummary) {
     const updated = await api.patchAnime(a.id, { favorite: !a.favorite });
     setItems((list) =>
-      filter === 'favorite' && !updated.favorite
+      favorite !== '' && updated.favorite !== (favorite === '1')
         ? (list ?? []).filter((x) => x.id !== a.id)
         : (list ?? []).map((x) => (x.id === a.id ? { ...x, favorite: updated.favorite } : x)),
     );
   }
+
+  // 快速動作後就地更新，不因為不再符合篩選而消失
+  const replace = (d: AnimeDetail) => setItems((list) => (list ?? []).map((x) => (x.id === d.id ? d : x)));
 
   return (
     <>
@@ -132,6 +200,13 @@ export function AnimeListPage() {
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}（{g.count}）
+            </option>
+          ))}
+        </select>
+        <select value={favorite} onChange={(e) => update({ favorite: e.target.value })} aria-label="收藏">
+          {FAVORITE.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
             </option>
           ))}
         </select>
@@ -187,6 +262,7 @@ export function AnimeListPage() {
                 </div>
               </div>
             </Link>
+            <CardActions anime={a} groups={groups} onChange={replace} />
           </li>
         ))}
       </ul>

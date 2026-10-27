@@ -117,6 +117,10 @@ export const reviewPutSchema = z
   .refine((r) => r.animeId || r.animeSn, { message: '需要 animeId 或 animeSn' });
 export type ReviewPut = z.input<typeof reviewPutSchema>;
 
+/** 直接設定作品評分（列表快速評分）；null 清除評分 */
+export const ratingPutSchema = z.object({ rating: z.number().int().min(1).max(5).nullable() });
+export type RatingPut = z.infer<typeof ratingPutSchema>;
+
 /** 手動新增兩部作品的關聯 */
 export const relationAddSchema = z.object({ targetId: z.string().min(1) });
 export type RelationAdd = z.infer<typeof relationAddSchema>;
@@ -297,6 +301,8 @@ export interface AnimeListQuery {
   ratings?: AnimeRating[];
   /** 有手動標記時以手動為準 */
   progress?: AnimeProgress;
+  /** true：只列收藏；false：只列沒收藏的 */
+  favorite?: boolean;
   sort?: AnimeSort;
 }
 

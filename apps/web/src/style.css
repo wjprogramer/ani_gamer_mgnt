@@ -80,10 +80,24 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
 .grid {
   list-style: none; margin: 0; padding: 0;
   display: grid; gap: 14px;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
 }
-.card a { display: block; color: inherit; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); }
-.card a:hover { text-decoration: none; border-color: var(--accent); }
+.card { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.card:hover { border-color: var(--accent); }
+.card > a { display: block; flex: 1; color: inherit; border-radius: 8px 8px 0 0; overflow: hidden; }
+.card > a:hover { text-decoration: none; }
+.card-actions { display: flex; align-items: center; gap: 4px; padding: 4px 8px 8px; font-size: .8rem; }
+.card-actions .popover summary { padding: 1px 6px; }
+.card-actions .multi-select summary::after { content: none; }
+.card-actions .popover-menu { left: auto; right: 0; }
+.quick-review { display: grid; gap: 6px; width: 240px; }
+.quick-review textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+
+.rating-input { display: inline-flex; }
+.rating-input button { border: none; background: transparent; padding: 0 1px; font-size: 1rem; line-height: 1; color: var(--line); }
+.rating-input button.on { color: #e3b341; }
+.rating-input:hover button { color: #e3b341; }
+.rating-input button:hover ~ button { color: var(--line); }
 .card.hidden { opacity: .55; }
 .cover { position: relative; aspect-ratio: 3 / 4; background: var(--line); }
 .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -175,17 +189,18 @@ h1 .favorite { font-size: 1.5rem; }
 .chip { border-radius: 999px; padding: 2px 12px; font-size: .9rem; color: var(--muted); }
 .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-.multi-select { position: relative; }
-.multi-select summary {
-  list-style: none; cursor: pointer; padding: 4px 24px 4px 8px; border: 1px solid var(--line); border-radius: 6px;
+.popover { position: relative; }
+.popover summary {
+  list-style: none; cursor: pointer; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--card); white-space: nowrap; position: relative;
 }
-.multi-select summary::-webkit-details-marker { display: none; }
+.popover summary::-webkit-details-marker { display: none; }
+.multi-select summary { padding-right: 24px; }
 .multi-select summary::after { content: '▾'; position: absolute; right: 8px; color: var(--muted); }
-.multi-select-menu {
+.popover-menu {
   position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; min-width: 100%;
   display: grid; gap: 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--card); box-shadow: 0 4px 12px rgb(0 0 0 / .15); white-space: nowrap;
 }
-.multi-select-menu label { flex-wrap: nowrap; gap: 8px; color: inherit; }
-.multi-select-menu input { margin: 0; padding: 0; }
+.popover-menu label { flex-wrap: nowrap; gap: 8px; color: inherit; }
+.popover-menu input[type="checkbox"] { margin: 0; padding: 0; }

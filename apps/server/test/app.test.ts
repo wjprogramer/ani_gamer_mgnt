@@ -503,6 +503,34 @@ describe('收藏、分群、評分篩選與排序', () => {
     expect((await call('GET', '/api/anime?sort=bad')).status).toBe(400);
   });
 
+  it('依有沒有收藏篩選', async () => {
+    const { a } = await seed();
+    await call('PATCH', `/api/anime/${a}`, { favorite: true });
+    expect(await titles('favorite=1')).toEqual(['B 作品']);
+    expect(await titles('favorite=0&sort=title')).toEqual(['A 作品', 'C 作品']);
+  });
+
+  it('快速評分：改最新一則有評分的評論，沒有就新增；清除時刪掉只有評分的評論', async () => {
+    const { a, c } = await seed();
+    const rate = (id: string, rating: number | null) => json<AnimeDetail>(call('PUT', `/api/anime/${id}/rating`, { rating }));
+
+    const rated = await rate(c, 4);
+    expect(rated.rating).toBe(4);
+    expect(rated.reviews).toMatchObject([{ rating: 4, content: '' }]);
+    expect((await rate(c, 2)).reviews).toMatchObject([{ rating: 2 }]);
+    expect((await rate(c, null)).reviews).toEqual([]);
+
+    // 有內容的評論保留內容，只拿掉評分
+    await call('PUT', '/api/reviews/RX', {
+      animeId: a, rating: null, content: '好看', createdAt: '2026-10-24T00:00:00.000Z', updatedAt: '2026-10-24T00:00:00.000Z',
+    });
+    expect((await rate(a, 5)).reviews.map((r) => [r.content, r.rating])).toEqual([['好看', null], ['', 5]]);
+    const cleared = await rate(a, null);
+    expect(cleared.rating).toBeNull();
+    expect(cleared.reviews.map((r) => r.content)).toEqual(['好看']);
+    expect((await call('PUT', `/api/anime/${a}/rating`, { rating: 6 })).status).toBe(400);
+  });
+
   it('依是否看完篩選（手動標記優先）', async () => {
     const { a, b } = await seed();
     await call('PATCH', `/api/anime/${a}`, { manualCompleted: true });

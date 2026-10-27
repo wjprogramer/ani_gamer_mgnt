@@ -20,6 +20,7 @@ import {
   mergeDismissSchema,
   mergeSchema,
   relationAddSchema,
+  ratingPutSchema,
   reviewPutSchema,
   SOURCES,
   snMapLookupSchema,
@@ -175,6 +176,7 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
         sort,
         ratings: ratings as AnimeRating[],
         progress,
+        favorite: query('favorite') === undefined ? undefined : query('favorite') === '1',
         q: query('q'),
         sites: sites as Source[],
         groupId: query('group'),
@@ -203,6 +205,10 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
     store.deleteReview(c.req.param('id'));
     return c.body(null, 204);
   });
+
+  api.put('/anime/:id/rating', async (c) =>
+    c.json(store.setRating(c.req.param('id'), (await body(c, ratingPutSchema)).rating)),
+  );
 
   api.put('/anime/:id/groups', async (c) =>
     c.json(store.setAnimeGroups(c.req.param('id'), (await body(c, animeGroupsPutSchema)).groupIds)),

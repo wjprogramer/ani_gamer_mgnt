@@ -327,6 +327,7 @@ export class Store {
     groupId,
     ratings = [],
     progress,
+    favorite,
     sort = 'default',
     includeHidden = false,
   }: AnimeListQuery = {}): AnimeSummary[] {
@@ -343,7 +344,8 @@ export class Store {
       where.push('EXISTS (SELECT 1 FROM anime_group_member m WHERE m.anime_id = a.id AND m.group_id = ?)');
       params.push(groupId);
     }
-    if (filter === 'favorite') where.push('a.favorite = 1');
+    if (filter === 'favorite' || favorite === true) where.push('a.favorite = 1');
+    if (favorite === false) where.push('a.favorite = 0');
     if (filter === 'hidden') where.push('a.hidden = 1');
     if (filter === 'watched') where.push('EXISTS (SELECT 1 FROM watch_event w WHERE w.anime_id = a.id)');
     if (filter === 'reviewed') where.push('EXISTS (SELECT 1 FROM review r WHERE r.anime_id = a.id)');
@@ -635,6 +637,35 @@ export class Store {
         input.updatedAt,
       );
     return toReview(this.db.prepare('SELECT * FROM review WHERE id = ?').get(id) as unknown as ReviewRow);
+  }
+
+  /**
+   * 作品的評分取最新一則有給星的評論，所以改那一則；還沒有時新增一則只有評分的評論。
+   * 清除時拿掉所有評論的評分，只有評分、沒有內容的評論一併刪除。
+   */
+  setRating(animeId: string, rating: number | null): AnimeDetail {
+    if (!this.animeRow(animeId)) throw new NotFoundError(`找不到作品 ${animeId}`);
+    const t = now();
+    transaction(this.db, () => {
+      if (rating === null) {
+        this.db.prepare("DELETE FROM review WHERE anime_id = ? AND content = '' AND rating IS NOT NULL").run(animeId);
+        this.db.prepare('UPDATE review SET rating = NULL, updated_at = ? WHERE anime_id = ? AND rating IS NOT NULL').run(t, animeId);
+        return;
+      }
+      const latest = this.db
+        .prepare('SELECT id FROM review WHERE anime_id = ? AND rating IS NOT NULL ORDER BY updated_at DESC LIMIT 1')
+        .get(animeId) as { id: string } | undefined;
+      if (latest) this.db.prepare('UPDATE review SET rating = ?, updated_at = ? WHERE id = ?').run(rating, t, latest.id);
+      else {
+        this.db
+          .prepare(
+            `INSERT INTO review (id, anime_id, episode_id, rating, content, spoiler, created_at, updated_at)
+             VALUES (?, ?, NULL, ?, '', 0, ?, ?)`,
+          )
+          .run(ulid(), animeId, rating, t, t);
+      }
+    });
+    return this.getAnime(animeId);
   }
 
   deleteReview(id: string) {
