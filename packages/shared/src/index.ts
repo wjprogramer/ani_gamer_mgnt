@@ -295,7 +295,7 @@ export interface AnimeListQuery {
   /** 符合任一來源；空陣列或省略表示全部 */
   sites?: Source[];
   groupId?: string;
-  /** 「已隱藏」以外的篩選預設不含已隱藏的作品 */
+  /** 「已隱藏」以外的篩選預設不含已隱藏的作品；有搜尋字串時一律包含，並排在最後 */
   includeHidden?: boolean;
   /** 符合任一評分（1–5 星，unrated 為未評分）；空陣列或省略表示全部 */
   ratings?: AnimeRating[];

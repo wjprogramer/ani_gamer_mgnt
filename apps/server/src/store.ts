@@ -339,7 +339,8 @@ export class Store {
       );
       params.push(...sites);
     }
-    if (filter !== 'hidden' && !includeHidden) where.push('a.hidden = 0');
+    // 搜尋時也列出已隱藏的作品，排在最後
+    if (filter !== 'hidden' && !includeHidden && !q) where.push('a.hidden = 0');
     if (groupId) {
       where.push('EXISTS (SELECT 1 FROM anime_group_member m WHERE m.anime_id = a.id AND m.group_id = ?)');
       params.push(groupId);
@@ -375,7 +376,7 @@ export class Store {
         if (progress === 'unwatched') return !a.completed && a.lastWatchedAt === null;
         return true;
       })
-      .sort(compare[sort]);
+      .sort((a, b) => (q ? Number(a.hidden) - Number(b.hidden) : 0) || compare[sort](a, b));
   }
 
   getAnime(id: string): AnimeDetail {

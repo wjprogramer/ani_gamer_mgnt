@@ -503,6 +503,13 @@ describe('收藏、分群、評分篩選與排序', () => {
     expect((await call('GET', '/api/anime?sort=bad')).status).toBe(400);
   });
 
+  it('搜尋時列出已隱藏的作品並排在最後', async () => {
+    const { b } = await seed();
+    await call('PATCH', `/api/anime/${b}`, { hidden: true });
+    expect(await titles('sort=title')).toEqual(['B 作品', 'C 作品']);
+    expect(await titles('q=作品&sort=title')).toEqual(['B 作品', 'C 作品', 'A 作品']);
+  });
+
   it('依有沒有收藏篩選', async () => {
     const { a } = await seed();
     await call('PATCH', `/api/anime/${a}`, { favorite: true });
