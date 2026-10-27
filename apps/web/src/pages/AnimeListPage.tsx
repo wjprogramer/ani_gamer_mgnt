@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { ANIME_RATINGS, SOURCES, ulid, type AnimeFilter, type AnimeDetail, type AnimeGroup, type AnimeProgress, type AnimeSort, type AnimeSummary, type Source } from '@agm/shared';
+import { ANIME_RATINGS, SOURCES, ulid, type AnimeFilter, type AnimeDetail, type AnimeGroup, type AnimePatch, type AnimeProgress, type AnimeSort, type AnimeSummary, type Source } from '@agm/shared';
 import { api, formatTime, progressText, siteLabel } from '../api.ts';
 import { FavoriteButton, MultiSelect, Popover, RatingInput, Stars } from '../components.tsx';
 
@@ -32,8 +32,8 @@ const PROGRESS: { value: AnimeProgress | ''; label: string }[] = [
 
 const RATING_OPTIONS = ANIME_RATINGS.map((r) => ({ value: r, label: r === 'unrated' ? '未評分' : '★'.repeat(r) }));
 
-/** 列表卡片上的快速動作：評分、寫評論、加入分群 */
-function CardActions({
+/** 卡片右下角「⋯」展開的快速動作：評分、分群、評論、標記看完、隱藏 */
+function CardMenu({
   anime,
   groups,
   onChange,
@@ -45,25 +45,47 @@ function CardActions({
   const [content, setContent] = useState('');
   const [spoiler, setSpoiler] = useState(false);
 
-  async function saveReview(e: FormEvent, close: () => void) {
+  async function saveReview(e: FormEvent) {
     e.preventDefault();
     if (!content.trim()) return;
     const now = new Date().toISOString();
     await api.putReview(ulid(), { animeId: anime.id, content: content.trim(), spoiler, createdAt: now, updatedAt: now });
     setContent('');
     setSpoiler(false);
-    close();
     onChange(await api.getAnime(anime.id));
   }
 
+  const toggleGroup = (id: string, on: boolean) =>
+    void api
+      .setAnimeGroups(anime.id, on ? [...anime.groupIds, id] : anime.groupIds.filter((g) => g !== id))
+      .then(onChange);
+  const patch = (p: AnimePatch) => void api.patchAnime(anime.id, p).then(onChange);
+
   return (
-    <div className="card-actions">
-      <RatingInput value={anime.rating} onChange={(r) => void api.setRating(anime.id, r).then(onChange)} />
-      <span className="grow" />
-      <Popover className="quick" title="寫評論" summary={`評論${anime.reviewCount ? ` ${anime.reviewCount}` : ''}`}>
-        {(close) => (
-          <form className="quick-review" onSubmit={(e) => void saveReview(e, close)}>
-            <textarea rows={4} placeholder={`對「${anime.title}」的想法…`} value={content} onChange={(e) => setContent(e.target.value)} />
+    <Popover className="card-menu" title="更多動作" summary="⋯">
+      {() => (
+        <>
+          <div className="menu-section">
+            <span className="muted small">評分</span>
+            <RatingInput value={anime.rating} onChange={(r) => void api.setRating(anime.id, r).then(onChange)} />
+          </div>
+          <div className="menu-section">
+            <span className="muted small">分群</span>
+            {groups.map((g) => (
+              <label key={g.id} className="row small">
+                <input type="checkbox" checked={anime.groupIds.includes(g.id)} onChange={(e) => toggleGroup(g.id, e.target.checked)} />
+                {g.name}
+              </label>
+            ))}
+            {groups.length === 0 && (
+              <Link className="small" to="/groups">
+                先到分群頁新增分群
+              </Link>
+            )}
+          </div>
+          <form className="menu-section" onSubmit={(e) => void saveReview(e)}>
+            <span className="muted small">寫評論{anime.reviewCount > 0 && `（已有 ${anime.reviewCount} 則）`}</span>
+            <textarea rows={3} value={content} onChange={(e) => setContent(e.target.value)} />
             <div className="row small">
               <label className="row small">
                 <input type="checkbox" checked={spoiler} onChange={(e) => setSpoiler(e.target.checked)} />
@@ -75,17 +97,23 @@ function CardActions({
               </button>
             </div>
           </form>
-        )}
-      </Popover>
-      <MultiSelect
-        label="分群"
-        summary={`分群${anime.groupIds.length ? ` ${anime.groupIds.length}` : ''}`}
-        options={groups.map((g) => ({ value: g.id, label: g.name }))}
-        value={anime.groupIds}
-        onChange={(ids) => void api.setAnimeGroups(anime.id, ids).then(onChange)}
-        empty={<Link to="/groups">先到分群頁新增分群</Link>}
-      />
-    </div>
+          <div className="menu-section menu-actions">
+            {anime.manualCompleted === true ? (
+              <button type="button" onClick={() => patch({ manualCompleted: null })}>
+                取消標記看完
+              </button>
+            ) : (
+              <button type="button" onClick={() => patch({ manualCompleted: true })}>
+                標記看完
+              </button>
+            )}
+            <button type="button" onClick={() => patch({ hidden: !anime.hidden })}>
+              {anime.hidden ? '取消隱藏' : '隱藏'}
+            </button>
+          </div>
+        </>
+      )}
+    </Popover>
   );
 }
 
@@ -262,7 +290,7 @@ export function AnimeListPage() {
                 </div>
               </div>
             </Link>
-            <CardActions anime={a} groups={groups} onChange={replace} />
+            <CardMenu anime={a} groups={groups} onChange={replace} />
           </li>
         ))}
       </ul>
