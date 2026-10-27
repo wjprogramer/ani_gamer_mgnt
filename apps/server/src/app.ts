@@ -17,6 +17,7 @@ import {
   markCompletedSchema,
   mergeDismissSchema,
   mergeSchema,
+  relationAddSchema,
   reviewPutSchema,
   SOURCES,
   snMapLookupSchema,
@@ -196,6 +197,16 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
   api.put('/anime/:id/groups', async (c) =>
     c.json(store.setAnimeGroups(c.req.param('id'), (await body(c, animeGroupsPutSchema)).groupIds)),
   );
+
+  api.post('/anime/:id/relations', async (c) =>
+    c.json(store.addRelation(c.req.param('id'), (await body(c, relationAddSchema)).targetId)),
+  );
+
+  api.delete('/anime/:id/relations/:source/:externalId', (c) => {
+    const source = c.req.param('source');
+    if (!isSource(source)) throw new HTTPException(400, { message: 'source 不正確' });
+    return c.json(store.removeRelation(c.req.param('id'), source, c.req.param('externalId')));
+  });
 
   api.get('/groups', (c) => c.json(store.listGroups()));
 

@@ -59,6 +59,7 @@ async function initVideoPage(ctx: ContentScriptContext, signal: AbortSignal) {
       coverUrl: info.coverUrl,
       tags: info.tags,
       episodes: info.episodes,
+      related: info.related,
     },
     `anime:bahamut:${info.animeSn}`,
   );

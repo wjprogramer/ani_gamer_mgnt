@@ -5,6 +5,7 @@ import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { createCoverQueue } from './covers.ts';
 import { openDb } from './db.ts';
+import { startRelationBackfill } from './relations.ts';
 import { Store } from './store.ts';
 
 const config = loadConfig();
@@ -29,4 +30,5 @@ if (fs.existsSync(config.webDistDir)) {
 serve({ fetch: app.fetch, hostname: config.host, port: config.port }, (info) => {
   console.log(`本機 server 已啟動：http://${config.host}:${info.port}`);
   console.log(`資料目錄：${config.dataDir}`);
+  startRelationBackfill(store);
 });

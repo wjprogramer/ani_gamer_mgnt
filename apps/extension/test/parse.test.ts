@@ -58,6 +58,14 @@ describe('parseVideoPage', () => {
     expect(info!.episodes[0]).toEqual({ videoSn: '44034', label: '1', sortOrder: 0 });
   });
 
+  it('解析相關動畫，排除自己', () => {
+    const info = parseVideoPage(doc(fixture('video-page.html')), 'https://ani.gamer.com.tw/animeVideo.php?sn=51805');
+    expect(info!.related).toEqual([
+      { animeSn: '113130', title: '轉生就是劍', coverUrl: 'https://p2.bahamut.com.tw/B/ACG/c/27/0000119827.JPG' },
+      { animeSn: '114195', title: '轉生就是劍 第二季 & 特別篇' },
+    ]);
+  });
+
   it('不是播放頁時回傳 undefined', () => {
     expect(parseVideoPage(doc('<p>x</p>'), 'https://ani.gamer.com.tw/animeVideo.php?sn=1')).toBeUndefined();
   });

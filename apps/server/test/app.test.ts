@@ -1,7 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { AnimeDetail, AnimeGroup, AnimeSummary, CardStatus, MergeCandidate, WatchEvent, WatchHistoryItem } from '@agm/shared';
 import { createApp } from '../src/app.ts';
 import { openDb } from '../src/db.ts';
+import { fetchRelated, parseRelatedHtml } from '../src/relations.ts';
 import { normalizeTitle, Store, titleSimilarity } from '../src/store.ts';
 
 const PORT = 17890;
@@ -526,5 +529,93 @@ describe('收藏、分群、評分篩選與排序', () => {
     await call('PUT', `/api/anime/${b}/groups`, { groupIds: [g.id] });
     const merged = await json<AnimeDetail>(call('POST', '/api/merge', { targetId: a, sourceId: b }));
     expect(merged).toMatchObject({ favorite: true, groupIds: [g.id] });
+  });
+});
+
+describe('相關作品', () => {
+  const html = fs.readFileSync(path.join(import.meta.dirname, '../../extension/test/fixtures/video-page.html'), 'utf8');
+  const detail = (id: string) => json<AnimeDetail>(call('GET', `/api/anime/${id}`));
+  const related = async (id: string) => (await detail(id)).related.map((r) => [r.title, r.anime?.id ?? null, r.origin]);
+  const upsert = (body: object, source = 'bahamut') => json<AnimeDetail>(call('POST', `/api/${source}/anime`, body));
+
+  it('解析播放頁 HTML 的相關動畫', () => {
+    expect(parseRelatedHtml(html)).toEqual([
+      { animeSn: '113130', title: '轉生就是劍', coverUrl: 'https://p2.bahamut.com.tw/B/ACG/c/27/0000119827.JPG' },
+      { animeSn: '113845', title: '殺手旅店' },
+      { animeSn: '114195', title: '轉生就是劍 第二季 & 特別篇' },
+    ]);
+    expect(parseRelatedHtml('<p>沒有相關動畫</p>')).toEqual([]);
+  });
+
+  it('兩個方向都列出；尚未建檔的只列名稱，不會多出作品', async () => {
+    const s2 = await upsert({ animeSn: '114195', title: '轉生就是劍 第二季', related: [{ animeSn: '113130', title: '轉生就是劍' }] });
+    expect(await related(s2.id)).toEqual([['轉生就是劍', null, 'site']]);
+    expect((await detail(s2.id)).related[0]!.url).toBe('https://ani.gamer.com.tw/animeRef.php?sn=113130');
+    expect(await json<AnimeSummary[]>(call('GET', '/api/anime'))).toHaveLength(1);
+
+    // 第一季建檔後，第二季那邊改顯示作品資料，第一季也看得到第二季
+    const s1 = await upsert({ animeSn: '113130', title: '轉生就是劍' });
+    expect(await related(s2.id)).toEqual([['轉生就是劍', s1.id, 'site']]);
+    expect(await related(s1.id)).toEqual([['轉生就是劍 第二季', s2.id, 'site']]);
+  });
+
+  it('手動新增與移除；移除後重新讀取來源網站也不會加回', async () => {
+    const s1 = await upsert({ animeSn: '113130', title: '轉生就是劍' });
+    const s2 = await upsert({ animeSn: '114195', title: '轉生就是劍 第二季', related: [{ animeSn: '113130', title: '轉生就是劍' }] });
+    const nf = await upsert({ animeSn: '81000001', title: '轉生就是劍' }, 'netflix');
+
+    const added = await json<AnimeDetail>(call('POST', `/api/anime/${s1.id}/relations`, { targetId: nf.id }));
+    // 依名稱排序
+    expect(added.related.map((r) => r.anime?.id)).toEqual([nf.id, s2.id]);
+    expect(await related(nf.id)).toEqual([['轉生就是劍', s1.id, 'manual']]);
+
+    // 從第一季這邊移除第二季（關聯是第二季那邊記錄的）
+    const removed = await json<AnimeDetail>(call('DELETE', `/api/anime/${s1.id}/relations/bahamut/114195`));
+    expect(removed.related.map((r) => r.anime?.id)).toEqual([nf.id]);
+    await upsert({ animeSn: '114195', title: '轉生就是劍 第二季', related: [{ animeSn: '113130', title: '轉生就是劍' }] });
+    await upsert({ animeSn: '113130', title: '轉生就是劍', related: [{ animeSn: '114195', title: '轉生就是劍 第二季' }] });
+    expect(await related(s2.id)).toEqual([]);
+
+    // 手動加回
+    await call('POST', `/api/anime/${s2.id}/relations`, { targetId: s1.id });
+    expect(await related(s1.id)).toContainEqual(['轉生就是劍 第二季', s2.id, 'manual']);
+    expect((await call('POST', `/api/anime/${s1.id}/relations`, { targetId: s1.id })).status).toBe(404);
+  });
+
+  it('移除尚未建檔的相關作品', async () => {
+    const s2 = await upsert({ animeSn: '114195', title: '轉生就是劍 第二季', related: [{ animeSn: '113130', title: '轉生就是劍' }] });
+    await call('DELETE', `/api/anime/${s2.id}/relations/bahamut/113130`);
+    await upsert({ animeSn: '114195', title: '轉生就是劍 第二季', related: [{ animeSn: '113130', title: '轉生就是劍' }] });
+    expect(await related(s2.id)).toEqual([]);
+  });
+
+  it('合併後關聯跟著移到保留的作品，不會關聯到自己', async () => {
+    const s1 = await upsert({ animeSn: '113130', title: '轉生就是劍', related: [{ animeSn: '114195', title: '第二季' }] });
+    const s2 = await upsert({ animeSn: '114195', title: '轉生就是劍 第二季' });
+    const nf = await upsert({ animeSn: '81000001', title: '轉生就是劍' }, 'netflix');
+    await call('POST', `/api/anime/${nf.id}/relations`, { targetId: s1.id });
+    const merged = await json<AnimeDetail>(call('POST', '/api/merge', { targetId: s1.id, sourceId: nf.id }));
+    expect(merged.related.map((r) => r.anime?.id)).toEqual([s2.id]);
+    expect(await related(s2.id)).toEqual([['轉生就是劍', s1.id, 'site']]);
+  });
+
+  it('背景補抓：只讀還沒讀過的作品', async () => {
+    const store = new Store(openDb(':memory:'));
+    store.upsertAnime('bahamut', { animeSn: '113845', title: '殺手旅店' });
+    store.upsertAnime('bahamut', { animeSn: '1', title: '已讀過', related: [] });
+    expect(store.pendingRelationFetch('bahamut')).toEqual(['113845']);
+
+    const urls: string[] = [];
+    const fake = (async (url: string) => {
+      urls.push(url);
+      return new Response(html);
+    }) as unknown as typeof fetch;
+    const list = await fetchRelated('113845', fake);
+    store.setSiteRelations('bahamut', '113845', list!);
+    expect(urls).toEqual(['https://ani.gamer.com.tw/animeRef.php?sn=113845']);
+    expect(store.pendingRelationFetch('bahamut')).toEqual([]);
+    const id = store.findAnimeId('bahamut', '113845')!;
+    expect(store.relations(id).map((r) => r.externalId)).toEqual(['113130', '114195']);
+    expect(await fetchRelated('1', (async () => new Response('', { status: 503 })) as unknown as typeof fetch)).toBeUndefined();
   });
 });

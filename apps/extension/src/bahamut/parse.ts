@@ -9,6 +9,8 @@ export interface VideoPageInfo {
   tags: string[];
   episodes: { videoSn: string; label: string; sortOrder: number }[];
   episodeLabel?: string;
+  /** 「相關動畫」區塊列出的作品 */
+  related: { animeSn: string; title: string; coverUrl?: string }[];
 }
 
 export interface CardInfo {
@@ -24,6 +26,8 @@ interface CardRule {
   title: string;
 }
 
+const THEME_CARD: CardRule = { selector: 'a.theme-list-main', title: '.theme-name' };
+
 /** 各頁面的動畫卡片 */
 export const CARD_RULES: CardRule[] = [
   // 首頁「本季新番」
@@ -31,7 +35,7 @@ export const CARD_RULES: CardRule[] = [
   // 首頁「週期表」純文字列表
   { selector: 'a.text-anime-info', title: '.text-anime-name' },
   // 首頁熱播／主題推薦、所有動畫
-  { selector: 'a.theme-list-main', title: '.theme-name' },
+  THEME_CARD,
 ];
 
 const TOGGLE_GATHER = /toggleGather\(\s*(\d+)\s*,\s*(\d+)/;
@@ -109,6 +113,13 @@ export function parseVideoPage(doc: Document, url: string): VideoPageInfo | unde
     tags: [...doc.querySelectorAll('.data-file .tag-list .tag')].map((t) => t.textContent?.trim() ?? '').filter(Boolean),
     episodes,
     episodeLabel: current?.label ?? h1Label,
+    // server 補抓時以 HTML 解析同一個區塊（apps/server/src/relations.ts）
+    related: [...doc.querySelectorAll<HTMLElement>(`#relanime ${THEME_CARD.selector}`)].flatMap((el) => {
+      const c = parseCard(el, THEME_CARD);
+      return c.animeSn && c.title && c.animeSn !== gather.animeSn
+        ? [{ animeSn: c.animeSn, title: c.title, ...(c.coverUrl ? { coverUrl: c.coverUrl } : {}) }]
+        : [];
+    }),
   };
 }
 

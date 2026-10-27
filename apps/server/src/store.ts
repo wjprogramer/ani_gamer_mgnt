@@ -17,6 +17,8 @@ import {
   type ImportResult,
   type MarkCompleted,
   type MergeCandidate,
+  type RelatedAnime,
+  type RelatedAnimeInput,
   type Review,
   type ReviewPut,
   type SnMap,
@@ -52,6 +54,16 @@ interface WatchRow {
   duration_sec: number;
   completed: number;
   source: 'auto' | 'import' | 'manual';
+}
+
+interface RelationRow {
+  anime_id: string;
+  source: Source;
+  external_id: string;
+  title: string;
+  cover_url: string | null;
+  origin: 'site' | 'manual';
+  removed: number;
 }
 
 interface ReviewRow {
@@ -170,6 +182,7 @@ export class Store {
     return transaction(this.db, () => {
       const id = this.ensureAnime(source, input);
       for (const ep of input.episodes ?? []) this.upsertEpisode(source, id, ep.videoSn, ep.label, ep.sortOrder);
+      if (input.related) this.putSiteRelations(source, input.animeSn, input.related);
       return { id, coverUrl: this.pendingCoverUrl(id) };
     });
   }
@@ -395,6 +408,7 @@ export class Store {
         }),
       ),
       reviews: this.listReviews(id),
+      related: this.relations(id),
     };
   }
 
@@ -670,6 +684,152 @@ export class Store {
     return this.getAnime(animeId);
   }
 
+  // ---- 相關作品 ----
+
+  /** 記錄來源網站列出的相關作品；已手動移除的維持移除 */
+  private putSiteRelations(source: Source, externalId: string, related: RelatedAnimeInput[]) {
+    const animeId = this.findAnimeId(source, externalId);
+    if (!animeId) return;
+    const upsert = this.db.prepare(
+      `INSERT INTO anime_relation (anime_id, source, external_id, title, cover_url, origin, created_at)
+       VALUES (?, ?, ?, ?, ?, 'site', ?)
+       ON CONFLICT DO UPDATE SET title = excluded.title, cover_url = COALESCE(excluded.cover_url, cover_url)`,
+    );
+    for (const r of related) {
+      if (r.animeSn !== externalId) upsert.run(animeId, source, r.animeSn, r.title, r.coverUrl ?? null, now());
+    }
+    this.db
+      .prepare('UPDATE anime_source SET relations_fetched_at = ? WHERE source = ? AND external_id = ?')
+      .run(now(), source, externalId);
+  }
+
+  /** 背景補抓用 */
+  setSiteRelations(source: Source, externalId: string, related: RelatedAnimeInput[]) {
+    transaction(this.db, () => this.putSiteRelations(source, externalId, related));
+  }
+
+  /** 還沒讀過相關作品的來源 ID */
+  pendingRelationFetch(source: Source): string[] {
+    const rows = this.db
+      .prepare('SELECT external_id FROM anime_source WHERE source = ? AND relations_fetched_at IS NULL ORDER BY first_seen_at')
+      .all(source) as { external_id: string }[];
+    return rows.map((r) => r.external_id);
+  }
+
+  private sourcesOf(animeId: string) {
+    return this.db
+      .prepare('SELECT source, external_id FROM anime_source WHERE anime_id = ? ORDER BY first_seen_at')
+      .all(animeId) as { source: Source; external_id: string }[];
+  }
+
+  /** 兩個方向的關聯合併列出：這部記錄的對象，以及記錄了這部的作品 */
+  relations(animeId: string): RelatedAnime[] {
+    const forward = this.db.prepare('SELECT * FROM anime_relation WHERE anime_id = ?').all(animeId) as unknown as RelationRow[];
+    const reverse = this.db
+      .prepare(
+        `SELECT r.* FROM anime_relation r
+         JOIN anime_source s ON s.source = r.source AND s.external_id = r.external_id
+         WHERE s.anime_id = ?`,
+      )
+      .all(animeId) as unknown as RelationRow[];
+
+    const found = new Map<string, { row: RelationRow; targetId?: string }>();
+    const removed = new Set<string>();
+    const add = (row: RelationRow, targetId: string | undefined) => {
+      const key = targetId ?? `${row.source}:${row.external_id}`;
+      if (targetId === animeId) return;
+      if (row.removed) removed.add(key);
+      // 手動新增的優先顯示
+      else if (!found.has(key) || row.origin === 'manual') found.set(key, { row, targetId });
+    };
+    for (const r of forward) add(r, this.findAnimeId(r.source, r.external_id));
+    for (const r of reverse) add(r, r.anime_id);
+
+    return [...found.entries()]
+      .filter(([key]) => !removed.has(key))
+      .map(([, { row, targetId }]): RelatedAnime => {
+        const target = targetId ? this.animeRow(targetId) : undefined;
+        if (!target) {
+          return {
+            source: row.source,
+            externalId: row.external_id,
+            title: row.title,
+            coverUrl: row.cover_url,
+            url: SOURCE_URLS[row.source](row.external_id),
+            origin: row.origin,
+            anime: null,
+          };
+        }
+        const summary = this.summary(target);
+        const first = this.sourcesOf(target.id)[0]!;
+        return {
+          source: first.source,
+          externalId: first.external_id,
+          title: summary.title,
+          coverUrl: summary.coverUrl,
+          url: SOURCE_URLS[first.source](first.external_id),
+          origin: row.origin,
+          anime: summary,
+        };
+      })
+      .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hant'));
+  }
+
+  addRelation(animeId: string, targetId: string): AnimeDetail {
+    const target = this.animeRow(targetId);
+    if (!this.animeRow(animeId) || !target || animeId === targetId) throw new NotFoundError('找不到要關聯的作品');
+    transaction(this.db, () => {
+      this.setRelationRemoved(animeId, targetId, false);
+      const first = this.sourcesOf(targetId)[0]!;
+      this.db
+        .prepare(
+          `INSERT INTO anime_relation (anime_id, source, external_id, title, origin, created_at)
+           VALUES (?, ?, ?, ?, 'manual', ?)
+           ON CONFLICT DO UPDATE SET origin = 'manual', removed = 0`,
+        )
+        .run(animeId, first.source, first.external_id, target.title, now());
+    });
+    return this.getAnime(animeId);
+  }
+
+  /** 對象以來源 ID 指定，尚未建檔的作品也能移除 */
+  removeRelation(animeId: string, source: Source, externalId: string): AnimeDetail {
+    if (!this.animeRow(animeId)) throw new NotFoundError(`找不到作品 ${animeId}`);
+    const targetId = this.findAnimeId(source, externalId);
+    transaction(this.db, () => {
+      if (targetId) this.setRelationRemoved(animeId, targetId, true);
+      else {
+        this.db
+          .prepare('UPDATE anime_relation SET removed = 1 WHERE anime_id = ? AND source = ? AND external_id = ?')
+          .run(animeId, source, externalId);
+      }
+    });
+    return this.getAnime(animeId);
+  }
+
+  /**
+   * 兩部已建檔作品之間的所有關聯（兩個方向、各個來源 ID）一起設定。
+   * 移除時也補上紀錄，之後讀到來源網站列出這組關聯也不會再出現。
+   */
+  private setRelationRemoved(aId: string, bId: string, removed: boolean) {
+    const upsert = this.db.prepare(
+      `INSERT INTO anime_relation (anime_id, source, external_id, title, origin, removed, created_at)
+       VALUES (?, ?, ?, ?, 'manual', 1, ?)
+       ON CONFLICT DO UPDATE SET removed = 1`,
+    );
+    const update = this.db.prepare('UPDATE anime_relation SET removed = 0 WHERE anime_id = ? AND source = ? AND external_id = ?');
+    for (const [from, to] of [
+      [aId, bId],
+      [bId, aId],
+    ] as const) {
+      const title = this.animeRow(to)!.title;
+      for (const s of this.sourcesOf(to)) {
+        if (removed) upsert.run(from, s.source, s.external_id, title, now());
+        else update.run(from, s.source, s.external_id);
+      }
+    }
+  }
+
   // ---- 合併 ----
 
   /** 名稱相似、來源不重疊，且沒有被標記為「不是同一部」的組合 */
@@ -723,6 +883,8 @@ export class Store {
       for (const table of ['anime_source', 'episode', 'watch_event', 'review']) {
         this.db.prepare(`UPDATE ${table} SET anime_id = ? WHERE anime_id = ?`).run(targetId, sourceId);
       }
+      // 兩邊都有的關聯保留目標作品的；剩下的隨刪除一起清掉
+      this.db.prepare('UPDATE OR IGNORE anime_relation SET anime_id = ? WHERE anime_id = ?').run(targetId, sourceId);
       this.db
         .prepare(
           `INSERT OR IGNORE INTO anime_group_member (group_id, anime_id, added_at)

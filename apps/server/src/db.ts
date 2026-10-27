@@ -104,6 +104,22 @@ const migrations: string[] = [
   );
   CREATE INDEX anime_group_member_anime ON anime_group_member(anime_id);
   `,
+  // 相關作品：對象以來源 ID 記錄，尚未建檔的作品也能先記下；removed 為手動移除，重新讀取來源網站時不會再加回
+  `
+  CREATE TABLE anime_relation (
+    anime_id    TEXT NOT NULL REFERENCES anime(id) ON DELETE CASCADE,
+    source      TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    cover_url   TEXT,
+    origin      TEXT NOT NULL,
+    removed     INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (anime_id, source, external_id)
+  );
+  CREATE INDEX anime_relation_target ON anime_relation(source, external_id);
+  ALTER TABLE anime_source ADD COLUMN relations_fetched_at TEXT;
+  `,
 ];
 
 export function openDb(file: string): DatabaseSync {

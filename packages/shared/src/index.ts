@@ -22,6 +22,10 @@ const isoTime = z.iso.datetime();
 // 以下 schema 各來源共用（路徑為 /api/<source>/...）。欄位沿用動畫瘋的命名：
 // animeSn 是來源的作品 ID（Netflix 為 title ID），videoSn 是單集 ID（Netflix 為 video ID；電影與作品相同）。
 
+/** 來源網站列出的相關作品（例如動畫瘋播放頁的「相關動畫」） */
+export const relatedAnimeSchema = z.object({ animeSn: sn, title: z.string().min(1), coverUrl: z.url().optional() });
+export type RelatedAnimeInput = z.infer<typeof relatedAnimeSchema>;
+
 export const bahamutAnimeUpsertSchema = z.object({
   animeSn: sn,
   acgSn: sn.optional(),
@@ -31,6 +35,8 @@ export const bahamutAnimeUpsertSchema = z.object({
   episodes: z
     .array(z.object({ videoSn: sn, label: z.string(), sortOrder: z.number().int() }))
     .optional(),
+  /** 有帶（包含空陣列）表示已讀過來源網站的相關作品 */
+  related: z.array(relatedAnimeSchema).max(100).optional(),
 });
 export type BahamutAnimeUpsert = z.infer<typeof bahamutAnimeUpsertSchema>;
 
@@ -110,6 +116,10 @@ export const reviewPutSchema = z
   })
   .refine((r) => r.animeId || r.animeSn, { message: '需要 animeId 或 animeSn' });
 export type ReviewPut = z.input<typeof reviewPutSchema>;
+
+/** 手動新增兩部作品的關聯 */
+export const relationAddSchema = z.object({ targetId: z.string().min(1) });
+export type RelationAdd = z.infer<typeof relationAddSchema>;
 
 export const mergeSchema = z.object({
   /** 保留的作品 */
@@ -234,6 +244,21 @@ export interface AnimeDetail extends AnimeSummary {
   sources: AnimeSource[];
   episodes: Episode[];
   reviews: Review[];
+  related: RelatedAnime[];
+}
+
+/** 相關作品（續作、前傳等），兩個方向都會列出；每部作品仍各自獨立 */
+export interface RelatedAnime {
+  source: Source;
+  externalId: string;
+  title: string;
+  /** 已建檔時為本機封面，否則為來源網站的封面網址 */
+  coverUrl: string | null;
+  url: string;
+  /** site：來源網站列出的；manual：手動新增的 */
+  origin: 'site' | 'manual';
+  /** 尚未建檔時為 null */
+  anime: AnimeSummary | null;
 }
 
 export interface WatchHistoryItem extends WatchEvent {
