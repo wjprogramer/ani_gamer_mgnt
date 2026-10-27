@@ -9,7 +9,6 @@ const FILTERS: { value: AnimeFilter; label: string }[] = [
   { value: 'favorite', label: '收藏' },
   { value: 'watched', label: '看過' },
   { value: 'reviewed', label: '有評論' },
-  { value: 'hidden', label: '已隱藏' },
 ];
 
 const SORTS: { value: AnimeSort; label: string }[] = [
@@ -27,7 +26,8 @@ const RATINGS = [
 
 export function AnimeListPage() {
   const [params, setParams] = useSearchParams();
-  const filter = (params.get('filter') as AnimeFilter) || 'all';
+  // 舊網址可能帶 filter=hidden，不在分頁裡的值一律當成全部
+  const filter = FILTERS.find((f) => f.value === params.get('filter'))?.value ?? 'all';
   const q = params.get('q') ?? '';
   const site = params.get('site') ?? '';
   // 網址中以逗號分隔；沒選任何來源表示全部
@@ -35,6 +35,8 @@ export function AnimeListPage() {
   const group = params.get('group') ?? '';
   const rating = params.get('rating') ?? '';
   const sort = (params.get('sort') as AnimeSort) || 'default';
+  // 與其他篩選獨立；開啟時已隱藏的作品也一起列出
+  const showHidden = params.get('hidden') === '1';
   const [items, setItems] = useState<AnimeSummary[] | null>(null);
   const [groups, setGroups] = useState<AnimeGroup[]>([]);
   const [error, setError] = useState('');
@@ -51,17 +53,18 @@ export function AnimeListPage() {
           sites,
           groupId: group || undefined,
           rating: rating === 'unrated' ? 'unrated' : rating ? Number(rating) : undefined,
+          includeHidden: showHidden,
         })
         .then(setItems, (e: Error) => setError(e.message));
     }, 200);
     return () => clearTimeout(timer);
-  }, [filter, q, site, group, rating, sort]);
+  }, [filter, q, site, group, rating, sort, showHidden]);
 
   const toggleSite = (s: Source) =>
     update({ site: (sites.includes(s) ? sites.filter((x) => x !== s) : [...sites, s]).join(',') });
 
   const update = (next: Record<string, string>) => {
-    const merged: Record<string, string> = { filter, q, site, group, rating, sort, ...next };
+    const merged: Record<string, string> = { filter, q, site, group, rating, sort, hidden: showHidden ? '1' : '', ...next };
     // 預設值不放進網址
     if (merged.filter === 'all') delete merged.filter;
     if (merged.sort === 'default') delete merged.sort;
@@ -109,6 +112,14 @@ export function AnimeListPage() {
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          className={showHidden ? 'chip active' : 'chip'}
+          aria-pressed={showHidden}
+          onClick={() => update({ hidden: showHidden ? '' : '1' })}
+        >
+          顯示已隱藏
+        </button>
         <select value={group} onChange={(e) => update({ group: e.target.value })} aria-label="分群">
           <option value="">所有分群</option>
           {groups.map((g) => (
