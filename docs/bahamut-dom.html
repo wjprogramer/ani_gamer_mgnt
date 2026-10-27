@@ -71,6 +71,7 @@
     <tr><td>封面</td><td><code>.data-file img.data-img</code> 的 <code>data-src</code>，格式為 <code>p2.bahamut.com.tw/B/ACG/c/&lt;acgSn 末兩碼&gt;/&lt;acgSn 補零至 10 碼&gt;.JPG</code></td></tr>
     <tr><td>分類標籤</td><td><code>.data-file .tag-list .tag</code></td></tr>
     <tr><td>集數列表</td><td><code>section.season li a[data-ani-video-sn]</code>；目前這一集是 <code>li.playing</code></td></tr>
+    <tr><td>相關動畫</td><td><code>#relanime a.theme-list-main</code>（<code>section.old_list</code>，標題「相關動畫」），卡片結構與首頁相同：<code>href</code> 的 <code>animeRef.php?sn=</code>、<code>.theme-name</code>、<code>img.theme-img</code> 的 <code>data-src</code>。伺服器端 HTML 就有，續作與前一季會互相列出。extension 以 DOM 解析（<code>src/bahamut/parse.ts</code>），server 補抓時以字串解析（<code>apps/server/src/relations.ts</code>）</td></tr>
     <tr><td>播放器</td><td><code>&lt;video&gt;</code> 由 JS 動態建立，伺服器端 HTML 裡沒有，要用 <code>MutationObserver</code> 等它出現</td></tr>
   </tbody>
 </table>
@@ -79,6 +80,7 @@
 <h2>4. 其他</h2>
 <ul>
   <li>封面圖片不檢查 Referer，server 可以直接下載。</li>
+  <li><code>animeRef.php?sn=&lt;animeSn&gt;</code> 會轉到第一集的播放頁，不需登入即可讀取，server 用來補抓相關動畫。</li>
   </ul>
 
 <h2>5. 觀看紀錄 API（需登入）</h2>
