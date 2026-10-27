@@ -6,6 +6,7 @@ import {
   type AnimeDetail,
   type AnimeGroup,
   type AnimeListQuery,
+  type AnimeRating,
   type AnimePatch,
   type AnimeSummary,
   type BahamutAnimeUpsert,
@@ -324,8 +325,8 @@ export class Store {
     q = '',
     sites = [],
     groupId,
-    rating,
-    completed,
+    ratings = [],
+    progress,
     sort = 'default',
     includeHidden = false,
   }: AnimeListQuery = {}): AnimeSummary[] {
@@ -365,8 +366,13 @@ export class Store {
     };
     return rows
       .map((r) => this.summary(r))
-      .filter((a) => (rating === undefined ? true : rating === 'unrated' ? a.rating === null : (a.rating ?? 0) >= rating))
-      .filter((a) => completed === undefined || a.completed === completed)
+      .filter((a) => !ratings.length || ratings.includes((a.rating ?? 'unrated') as AnimeRating))
+      .filter((a) => {
+        if (progress === 'completed') return a.completed;
+        if (progress === 'incomplete') return !a.completed;
+        if (progress === 'unwatched') return !a.completed && a.lastWatchedAt === null;
+        return true;
+      })
       .sort(compare[sort]);
   }
 

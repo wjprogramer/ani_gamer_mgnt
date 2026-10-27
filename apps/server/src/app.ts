@@ -4,6 +4,8 @@ import { HTTPException } from 'hono/http-exception';
 import type { z } from 'zod';
 import {
   ANIME_FILTERS,
+  ANIME_PROGRESS,
+  ANIME_RATINGS,
   ANIME_SORTS,
   animeGroupsPutSchema,
   animePatchSchema,
@@ -23,6 +25,8 @@ import {
   snMapLookupSchema,
   snMapPutSchema,
   type AnimeFilter,
+  type AnimeProgress,
+  type AnimeRating,
   type AnimeSort,
   type Health,
   type ImportResult,
@@ -157,17 +161,20 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
     // 多個來源以逗號分隔
     const sites = (query('site') ?? '').split(',').filter(Boolean);
     if (!sites.every(isSource)) throw bad('site');
-    const ratingParam = query('rating');
-    const rating = ratingParam === 'unrated' ? 'unrated' : ratingParam === undefined ? undefined : Number(ratingParam);
-    if (typeof rating === 'number' && !(Number.isInteger(rating) && rating >= 1 && rating <= 5)) throw bad('rating');
-    const completedParam = query('completed');
-    if (completedParam !== undefined && completedParam !== '1' && completedParam !== '0') throw bad('completed');
+    // 多個評分以逗號分隔，例如 5,3,unrated
+    const ratings = (query('rating') ?? '')
+      .split(',')
+      .filter(Boolean)
+      .map((r) => ANIME_RATINGS.find((x) => String(x) === r));
+    if (ratings.includes(undefined)) throw bad('rating');
+    const progress = query('progress') as AnimeProgress | undefined;
+    if (progress !== undefined && !ANIME_PROGRESS.includes(progress)) throw bad('progress');
     return c.json(
       store.listAnime({
         filter,
         sort,
-        rating,
-        completed: completedParam === undefined ? undefined : completedParam === '1',
+        ratings: ratings as AnimeRating[],
+        progress,
         q: query('q'),
         sites: sites as Source[],
         groupId: query('group'),

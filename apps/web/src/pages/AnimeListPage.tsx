@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { SOURCES, type AnimeFilter, type AnimeGroup, type AnimeSort, type AnimeSummary, type Source } from '@agm/shared';
+import { ANIME_RATINGS, SOURCES, type AnimeFilter, type AnimeGroup, type AnimeProgress, type AnimeSort, type AnimeSummary, type Source } from '@agm/shared';
 import { api, formatTime, progressText, siteLabel } from '../api.ts';
-import { FavoriteButton, Stars } from '../components.tsx';
+import { FavoriteButton, MultiSelect, Stars } from '../components.tsx';
 
 const FILTERS: { value: AnimeFilter; label: string }[] = [
   { value: 'all', label: '全部' },
@@ -18,17 +18,14 @@ const SORTS: { value: AnimeSort; label: string }[] = [
   { value: 'created', label: '最新建檔' },
 ];
 
-const COMPLETED = [
+const PROGRESS: { value: AnimeProgress | ''; label: string }[] = [
   { value: '', label: '所有進度' },
-  { value: '1', label: '已看完' },
-  { value: '0', label: '沒看完' },
+  { value: 'completed', label: '已看完' },
+  { value: 'incomplete', label: '沒看完' },
+  { value: 'unwatched', label: '還沒看' },
 ];
 
-const RATINGS = [
-  { value: '', label: '所有評分' },
-  ...[5, 4, 3, 2, 1].map((n) => ({ value: String(n), label: n === 5 ? '★★★★★' : `${'★'.repeat(n)} 以上` })),
-  { value: 'unrated', label: '未評分' },
-];
+const RATING_OPTIONS = ANIME_RATINGS.map((r) => ({ value: r, label: r === 'unrated' ? '未評分' : '★'.repeat(r) }));
 
 export function AnimeListPage() {
   const [params, setParams] = useSearchParams();
@@ -40,10 +37,12 @@ export function AnimeListPage() {
   const sites = site.split(',').filter((s): s is Source => (SOURCES as readonly string[]).includes(s));
   const group = params.get('group') ?? '';
   const rating = params.get('rating') ?? '';
+  // 網址中以逗號分隔，例如 5,3,unrated
+  const ratings = ANIME_RATINGS.filter((r) => rating.split(',').includes(String(r)));
   const sort = (params.get('sort') as AnimeSort) || 'default';
   // 與其他篩選獨立；開啟時已隱藏的作品也一起列出
   const showHidden = params.get('hidden') === '1';
-  const completed = params.get('completed') ?? '';
+  const progress = PROGRESS.find((p) => p.value === params.get('progress'))?.value ?? '';
   const [items, setItems] = useState<AnimeSummary[] | null>(null);
   const [groups, setGroups] = useState<AnimeGroup[]>([]);
   const [error, setError] = useState('');
@@ -59,20 +58,20 @@ export function AnimeListPage() {
           sort,
           sites,
           groupId: group || undefined,
-          rating: rating === 'unrated' ? 'unrated' : rating ? Number(rating) : undefined,
+          ratings,
           includeHidden: showHidden,
-          completed: completed === '' ? undefined : completed === '1',
+          progress: progress || undefined,
         })
         .then(setItems, (e: Error) => setError(e.message));
     }, 200);
     return () => clearTimeout(timer);
-  }, [filter, q, site, group, rating, sort, showHidden, completed]);
+  }, [filter, q, site, group, rating, sort, showHidden, progress]);
 
   const toggleSite = (s: Source) =>
     update({ site: (sites.includes(s) ? sites.filter((x) => x !== s) : [...sites, s]).join(',') });
 
   const update = (next: Record<string, string>) => {
-    const merged: Record<string, string> = { filter, q, site, group, rating, completed, sort, hidden: showHidden ? '1' : '', ...next };
+    const merged: Record<string, string> = { filter, q, site, group, rating, progress, sort, hidden: showHidden ? '1' : '', ...next };
     // 預設值不放進網址
     if (merged.filter === 'all') delete merged.filter;
     if (merged.sort === 'default') delete merged.sort;
@@ -136,20 +135,19 @@ export function AnimeListPage() {
             </option>
           ))}
         </select>
-        <select value={completed} onChange={(e) => update({ completed: e.target.value })} aria-label="是否看完">
-          {COMPLETED.map((c) => (
+        <select value={progress} onChange={(e) => update({ progress: e.target.value })} aria-label="觀看進度">
+          {PROGRESS.map((c) => (
             <option key={c.value} value={c.value}>
               {c.label}
             </option>
           ))}
         </select>
-        <select value={rating} onChange={(e) => update({ rating: e.target.value })} aria-label="評分">
-          {RATINGS.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
-            </option>
-          ))}
-        </select>
+        <MultiSelect
+          label="所有評分"
+          options={RATING_OPTIONS}
+          value={ratings}
+          onChange={(v) => update({ rating: v.join(',') })}
+        />
         <label className="row small">
           排序
           <select value={sort} onChange={(e) => update({ sort: e.target.value })}>

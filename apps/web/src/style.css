@@ -73,7 +73,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 .toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
-.toolbar input { flex: 1; min-width: 180px; }
+.toolbar input[type="search"] { flex: 1; min-width: 180px; }
 .tabs { display: flex; gap: 4px; }
 .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
@@ -174,3 +174,18 @@ h1 .favorite { font-size: 1.5rem; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { border-radius: 999px; padding: 2px 12px; font-size: .9rem; color: var(--muted); }
 .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.multi-select { position: relative; }
+.multi-select summary {
+  list-style: none; cursor: pointer; padding: 4px 24px 4px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); white-space: nowrap; position: relative;
+}
+.multi-select summary::-webkit-details-marker { display: none; }
+.multi-select summary::after { content: '▾'; position: absolute; right: 8px; color: var(--muted); }
+.multi-select-menu {
+  position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; min-width: 100%;
+  display: grid; gap: 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); box-shadow: 0 4px 12px rgb(0 0 0 / .15); white-space: nowrap;
+}
+.multi-select-menu label { flex-wrap: nowrap; gap: 8px; color: inherit; }
+.multi-select-menu input { margin: 0; padding: 0; }

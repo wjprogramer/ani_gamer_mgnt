@@ -490,22 +490,35 @@ describe('收藏、分群、評分篩選與排序', () => {
 
   it('依評分篩選與排序', async () => {
     await seed();
-    expect(await titles('rating=4')).toEqual(['A 作品']);
+    expect(await titles('rating=5')).toEqual(['A 作品']);
+    // 只看 3 星，不含 5 星
+    expect(await titles('rating=3')).toEqual(['B 作品']);
+    expect(await titles('rating=4')).toEqual([]);
     expect(await titles('rating=unrated')).toEqual(['C 作品']);
+    expect(await titles('rating=3,unrated&sort=title')).toEqual(['B 作品', 'C 作品']);
     expect(await titles('sort=rating')).toEqual(['A 作品', 'B 作品', 'C 作品']);
     expect(await titles('sort=title')).toEqual(['A 作品', 'B 作品', 'C 作品']);
     expect((await call('GET', '/api/anime?rating=6')).status).toBe(400);
+    expect((await call('GET', '/api/anime?rating=5,x')).status).toBe(400);
     expect((await call('GET', '/api/anime?sort=bad')).status).toBe(400);
   });
 
   it('依是否看完篩選（手動標記優先）', async () => {
     const { a, b } = await seed();
     await call('PATCH', `/api/anime/${a}`, { manualCompleted: true });
-    expect(await titles('completed=1')).toEqual(['B 作品']);
-    expect((await titles('completed=0&sort=title')).sort()).toEqual(['A 作品', 'C 作品']);
+    expect(await titles('progress=completed')).toEqual(['B 作品']);
+    expect(await titles('progress=incomplete&sort=title')).toEqual(['A 作品', 'C 作品']);
+    // C 有觀看紀錄，A 完全沒看過
+    await call('POST', '/api/bahamut/watch', {
+      id: 'W1', animeSn: '3', animeTitle: 'C 作品', videoSn: '30', episodeLabel: '1',
+      startedAt: '2026-10-23T00:00:00.000Z', at: '2026-10-23T00:05:00.000Z', progressSec: 300, durationSec: 1440,
+    });
+    expect(await titles('progress=unwatched')).toEqual(['A 作品']);
+    expect(await titles('progress=incomplete&sort=title')).toEqual(['A 作品', 'C 作品']);
     await call('PATCH', `/api/anime/${b}`, { manualCompleted: true });
-    expect((await titles('completed=1&rating=5'))).toEqual(['A 作品']);
-    expect((await call('GET', '/api/anime?completed=yes')).status).toBe(400);
+    expect(await titles('progress=completed&rating=5')).toEqual(['A 作品']);
+    expect(await titles('progress=unwatched')).toEqual([]);
+    expect((await call('GET', '/api/anime?progress=yes')).status).toBe(400);
   });
 
   it('分群：建立、設定、篩選、改名、刪除', async () => {

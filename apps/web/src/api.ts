@@ -27,14 +27,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  listAnime: ({ groupId, rating, sites, includeHidden, completed, ...rest }: AnimeListQuery) => {
+  listAnime: ({ groupId, ratings, sites, includeHidden, ...rest }: AnimeListQuery) => {
     const params = Object.entries({
       ...rest,
       group: groupId,
-      rating: rating === undefined ? undefined : String(rating),
+      rating: ratings?.join(','),
       site: sites?.join(','),
       hidden: includeHidden ? 'include' : undefined,
-      completed: completed === undefined ? undefined : completed ? '1' : '0',
     });
     const query = new URLSearchParams(params.filter((e): e is [string, string] => !!e[1]));
     return request<AnimeSummary[]>('GET', `/anime?${query}`);

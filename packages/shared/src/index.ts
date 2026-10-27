@@ -278,6 +278,13 @@ export const ANIME_FILTERS: AnimeFilter[] = ['all', 'hidden', 'watched', 'review
 export type AnimeSort = 'default' | 'title' | 'rating' | 'created';
 export const ANIME_SORTS: AnimeSort[] = ['default', 'title', 'rating', 'created'];
 
+/** completed：看完；incomplete：沒看完（包含還沒看的）；unwatched：沒有任何觀看紀錄 */
+export type AnimeProgress = 'completed' | 'incomplete' | 'unwatched';
+export const ANIME_PROGRESS: readonly AnimeProgress[] = ['completed', 'incomplete', 'unwatched'];
+
+export type AnimeRating = 1 | 2 | 3 | 4 | 5 | 'unrated';
+export const ANIME_RATINGS: readonly AnimeRating[] = [5, 4, 3, 2, 1, 'unrated'];
+
 export interface AnimeListQuery {
   filter?: AnimeFilter;
   q?: string;
@@ -286,10 +293,10 @@ export interface AnimeListQuery {
   groupId?: string;
   /** 「已隱藏」以外的篩選預設不含已隱藏的作品 */
   includeHidden?: boolean;
-  /** 1–5：N 星以上；unrated：未評分 */
-  rating?: number | 'unrated';
-  /** true：看完；false：沒看完（包含還沒看的）。有手動標記時以手動為準 */
-  completed?: boolean;
+  /** 符合任一評分（1–5 星，unrated 為未評分）；空陣列或省略表示全部 */
+  ratings?: AnimeRating[];
+  /** 有手動標記時以手動為準 */
+  progress?: AnimeProgress;
   sort?: AnimeSort;
 }
 
