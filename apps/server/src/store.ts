@@ -325,6 +325,7 @@ export class Store {
     sites = [],
     groupId,
     rating,
+    completed,
     sort = 'default',
     includeHidden = false,
   }: AnimeListQuery = {}): AnimeSummary[] {
@@ -365,6 +366,7 @@ export class Store {
     return rows
       .map((r) => this.summary(r))
       .filter((a) => (rating === undefined ? true : rating === 'unrated' ? a.rating === null : (a.rating ?? 0) >= rating))
+      .filter((a) => completed === undefined || a.completed === completed)
       .sort(compare[sort]);
   }
 

@@ -498,6 +498,16 @@ describe('收藏、分群、評分篩選與排序', () => {
     expect((await call('GET', '/api/anime?sort=bad')).status).toBe(400);
   });
 
+  it('依是否看完篩選（手動標記優先）', async () => {
+    const { a, b } = await seed();
+    await call('PATCH', `/api/anime/${a}`, { manualCompleted: true });
+    expect(await titles('completed=1')).toEqual(['B 作品']);
+    expect((await titles('completed=0&sort=title')).sort()).toEqual(['A 作品', 'C 作品']);
+    await call('PATCH', `/api/anime/${b}`, { manualCompleted: true });
+    expect((await titles('completed=1&rating=5'))).toEqual(['A 作品']);
+    expect((await call('GET', '/api/anime?completed=yes')).status).toBe(400);
+  });
+
   it('分群：建立、設定、篩選、改名、刪除', async () => {
     const { a, b } = await seed();
     const g1 = await json<AnimeGroup>(call('POST', '/api/groups', { name: '追番中' }));

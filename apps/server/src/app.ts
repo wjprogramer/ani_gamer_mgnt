@@ -160,11 +160,14 @@ export function createApp({ store, queueCover, port, dataDir, version = '0.1.0' 
     const ratingParam = query('rating');
     const rating = ratingParam === 'unrated' ? 'unrated' : ratingParam === undefined ? undefined : Number(ratingParam);
     if (typeof rating === 'number' && !(Number.isInteger(rating) && rating >= 1 && rating <= 5)) throw bad('rating');
+    const completedParam = query('completed');
+    if (completedParam !== undefined && completedParam !== '1' && completedParam !== '0') throw bad('completed');
     return c.json(
       store.listAnime({
         filter,
         sort,
         rating,
+        completed: completedParam === undefined ? undefined : completedParam === '1',
         q: query('q'),
         sites: sites as Source[],
         groupId: query('group'),

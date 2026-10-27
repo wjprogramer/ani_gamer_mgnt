@@ -288,6 +288,8 @@ export interface AnimeListQuery {
   includeHidden?: boolean;
   /** 1–5：N 星以上；unrated：未評分 */
   rating?: number | 'unrated';
+  /** true：看完；false：沒看完（包含還沒看的）。有手動標記時以手動為準 */
+  completed?: boolean;
   sort?: AnimeSort;
 }
 

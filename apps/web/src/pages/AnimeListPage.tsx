@@ -18,6 +18,12 @@ const SORTS: { value: AnimeSort; label: string }[] = [
   { value: 'created', label: '最新建檔' },
 ];
 
+const COMPLETED = [
+  { value: '', label: '所有進度' },
+  { value: '1', label: '已看完' },
+  { value: '0', label: '沒看完' },
+];
+
 const RATINGS = [
   { value: '', label: '所有評分' },
   ...[5, 4, 3, 2, 1].map((n) => ({ value: String(n), label: n === 5 ? '★★★★★' : `${'★'.repeat(n)} 以上` })),
@@ -37,6 +43,7 @@ export function AnimeListPage() {
   const sort = (params.get('sort') as AnimeSort) || 'default';
   // 與其他篩選獨立；開啟時已隱藏的作品也一起列出
   const showHidden = params.get('hidden') === '1';
+  const completed = params.get('completed') ?? '';
   const [items, setItems] = useState<AnimeSummary[] | null>(null);
   const [groups, setGroups] = useState<AnimeGroup[]>([]);
   const [error, setError] = useState('');
@@ -54,17 +61,18 @@ export function AnimeListPage() {
           groupId: group || undefined,
           rating: rating === 'unrated' ? 'unrated' : rating ? Number(rating) : undefined,
           includeHidden: showHidden,
+          completed: completed === '' ? undefined : completed === '1',
         })
         .then(setItems, (e: Error) => setError(e.message));
     }, 200);
     return () => clearTimeout(timer);
-  }, [filter, q, site, group, rating, sort, showHidden]);
+  }, [filter, q, site, group, rating, sort, showHidden, completed]);
 
   const toggleSite = (s: Source) =>
     update({ site: (sites.includes(s) ? sites.filter((x) => x !== s) : [...sites, s]).join(',') });
 
   const update = (next: Record<string, string>) => {
-    const merged: Record<string, string> = { filter, q, site, group, rating, sort, hidden: showHidden ? '1' : '', ...next };
+    const merged: Record<string, string> = { filter, q, site, group, rating, completed, sort, hidden: showHidden ? '1' : '', ...next };
     // 預設值不放進網址
     if (merged.filter === 'all') delete merged.filter;
     if (merged.sort === 'default') delete merged.sort;
@@ -125,6 +133,13 @@ export function AnimeListPage() {
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}（{g.count}）
+            </option>
+          ))}
+        </select>
+        <select value={completed} onChange={(e) => update({ completed: e.target.value })} aria-label="是否看完">
+          {COMPLETED.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
             </option>
           ))}
         </select>
